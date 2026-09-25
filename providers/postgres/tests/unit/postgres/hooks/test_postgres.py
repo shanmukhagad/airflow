@@ -92,6 +92,28 @@ class TestPostgresHookConn:
         with pytest.raises(AirflowException):
             hook.sqlalchemy_url
 
+    @pytest.mark.parametrize(
+        "scheme",
+        [
+            "postgresql+psycopg2://attacker.example.com/x",
+            "mysql+pymysql",
+            "postgresql+psycopg2@attacker.example.com",
+            "postgresql+psycopg2?host=attacker.example.com",
+        ],
+    )
+    def test_sqlalchemy_url_with_invalid_sqlalchemy_scheme(self, scheme):
+        conn = Connection(
+            login="login-conn",
+            password="password-conn",
+            host="host",
+            schema="database",
+            extra=dict(sqlalchemy_scheme=scheme),
+        )
+        hook = PostgresHook(connection=conn)
+
+        with pytest.raises(AirflowException):
+            hook.sqlalchemy_url
+
     @pytest.mark.parametrize("aws_conn_id", [NOTSET, None, "mock_aws_conn"])
     @pytest.mark.parametrize("port", [5432, 5439, None])
     @pytest.mark.parametrize(
@@ -596,6 +618,19 @@ class TestPostgresHookConnPPG3:
         hook = PostgresHook(connection=conn)
 
         expected = "postgresql+psycopg://login-conn:password-conn@host/database?gssencmode=disable"
+        assert hook.sqlalchemy_url.render_as_string(hide_password=False) == expected
+
+    def test_sqlalchemy_url_with_sqlalchemy_scheme(self):
+        conn = Connection(
+            login="login-conn",
+            password="password-conn",
+            host="host",
+            schema="database",
+            extra=dict(sqlalchemy_scheme="postgresql+psycopg2"),
+        )
+        hook = PostgresHook(connection=conn)
+
+        expected = "postgresql+psycopg2://login-conn:password-conn@host/database"
         assert hook.sqlalchemy_url.render_as_string(hide_password=False) == expected
 
     def test_get_conn_cursor(self, mocker):

@@ -184,8 +184,18 @@ class PostgresHook(DbApiHook):
             raise AirflowException("The parameter 'sqlalchemy_query' must be of type dict!")
         if conn.extra_dejson.get("iam", False):
             conn.login, conn.password, conn.port = self.get_iam_token(conn)
+        scheme = conn.extra_dejson.get("sqlalchemy_scheme")
+        if scheme:
+            if not scheme.startswith("postgresql") or any(c in scheme for c in ":/@?#"):
+                raise AirflowException(
+                    "The parameter 'sqlalchemy_scheme' must be 'postgresql' or "
+                    f"'postgresql+<driver>', got {scheme!r}"
+                )
+            drivername = scheme
+        else:
+            drivername = "postgresql+psycopg" if USE_PSYCOPG3 else "postgresql"
         return URL.create(
-            drivername="postgresql+psycopg" if USE_PSYCOPG3 else "postgresql",
+            drivername=drivername,
             username=self.__cast_nullable(conn.login, str),
             password=self.__cast_nullable(conn.password, str),
             host=self.__cast_nullable(conn.host, str),
