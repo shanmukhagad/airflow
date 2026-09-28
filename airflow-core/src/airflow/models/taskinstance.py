@@ -281,11 +281,18 @@ def _get_new_task_ids(
     # falls back to the latest version when bundle_version is not set (e.g.
     # LocalDagBundle), which would make current_dag == latest_dag and the diff
     # always empty.
-    current_dag = None
-    if dag_run.created_dag_version_id:
-        current_dag = scheduler_dagbag.get_dag(version_id=dag_run.created_dag_version_id, session=session)
-    new_task_ids = set(latest_dag.task_ids) - set(current_dag.task_ids) if current_dag else set()
+    # current_dag = None
+    # if dag_run.created_dag_version_id:
+    #     current_dag = scheduler_dagbag.get_dag(version_id=dag_run.created_dag_version_id, session=session)
+    # new_task_ids = set(latest_dag.task_ids) - set(current_dag.task_ids) if current_dag else set()
 
+    existing_ti_task_ids = set(
+        session.scalars(
+            select(TaskInstance.task_id).filter_by(dag_id=dag_id, run_id=run_id)
+        ).all()
+    )
+
+    new_task_ids = set(latest_dag.task_ids) - existing_ti_task_ids
     return list(new_task_ids)
 
 
