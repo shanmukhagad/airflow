@@ -105,7 +105,6 @@ class AwsTaskLogFetcher(Thread):
         # 1. Helper function for loop call
         def _fetch_and_log():
             log_events = self._get_log_events(continuation_token)
-            prev_timestamp_event = None
             for log_event in log_events:
                 current_timestamp_event = datetime.fromtimestamp(
                     log_event["timestamp"] / 1000.0, tz=timezone.utc
