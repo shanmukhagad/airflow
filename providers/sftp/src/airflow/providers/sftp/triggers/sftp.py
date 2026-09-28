@@ -119,7 +119,7 @@ class SFTPTrigger(BaseTrigger):
                 else:
                     mod_time = await hook.get_mod_time(self.path)
                     if _newer_than:
-                        mod_time_utc = timezone.convert_to_utc(datetime.strptime(mod_time, "%Y%m%d%H%M%S"))
+                        mod_time_utc = datetime.strptime(mod_time, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
                         if _newer_than <= mod_time_utc:
                             yield TriggerEvent({"status": "success", "message": f"Sensed file: {self.path}"})
                             return
