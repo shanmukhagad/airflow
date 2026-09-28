@@ -719,7 +719,7 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                     ranked_query.c.logical_date_for_ordering,
                     ranked_query.c.map_index_for_ordering,
                 )
-                .options(selectinload(TI.dag_model))
+                .options(selectinload(TI.dag_model), joinedload(TI.dag_run).defer(DagRun.conf))
             )
 
             query = query.limit(max_tis)
