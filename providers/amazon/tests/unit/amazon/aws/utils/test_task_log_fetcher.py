@@ -59,6 +59,7 @@ class TestAwsTaskLogFetcher:
                 ]
             ),
             iter([]),
+            iter([]),    # added 
         ),
     )
     def test_run(self, get_log_events_mock):
@@ -162,6 +163,7 @@ class TestAwsTaskLogFetcher:
                     },
                 ]
             ),
+            iter([]), # added 
         ),
     )
     def test_run_with_log_level_detection(self, get_log_events_mock):
