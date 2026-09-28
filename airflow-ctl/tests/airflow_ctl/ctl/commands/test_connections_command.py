@@ -273,9 +273,7 @@ class TestCliConnectionCommands:
         conn_file = tmp_path / "connections.json"
         conn_file.write_text(json.dumps(connections_data))
 
-        args = self.parser.parse_args(
-            ["connections", "import", str(conn_file)]
-        )
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
         api_client = mock.MagicMock(spec=Client)
 
         with pytest.raises(SystemExit) as exc_info:
@@ -284,7 +282,6 @@ class TestCliConnectionCommands:
         assert "conn_type" in str(exc_info.value)
         assert "my_conn" in str(exc_info.value)
         api_client.connections.bulk.assert_not_called()
-
 
     def test_import_missing_connection_id(self, tmp_path):
         """Missing connection_id raises SystemExit with a clear message."""
@@ -298,9 +295,7 @@ class TestCliConnectionCommands:
         conn_file = tmp_path / "connections.json"
         conn_file.write_text(json.dumps(connections_data))
 
-        args = self.parser.parse_args(
-            ["connections", "import", str(conn_file)]
-        )
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
         api_client = mock.MagicMock(spec=Client)
 
         with pytest.raises(SystemExit, match="connection_id") as exc_info:
@@ -321,9 +316,7 @@ class TestCliConnectionCommands:
         conn_file = tmp_path / "connections.json"
         conn_file.write_text(json.dumps(connections_data))
 
-        args = self.parser.parse_args(
-            ["connections", "import", str(conn_file)]
-        )
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
         api_client = mock.MagicMock(spec=Client)
 
         with pytest.raises(
