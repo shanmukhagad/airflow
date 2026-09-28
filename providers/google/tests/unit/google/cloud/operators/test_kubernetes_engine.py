@@ -68,6 +68,9 @@ from airflow.providers.google.cloud.operators.kubernetes_engine import (
 )
 
 from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
+from datetime import timedelta
+from unittest import mock
+from airflow.providers.google.cloud.operators.kubernetes_engine import GKEStartPodOperator
 
 if AIRFLOW_V_3_0_PLUS:
     from airflow.sdk.execution_time.comms import XComResult
@@ -1791,3 +1794,33 @@ class TestGKEResumeJobOperator:
         )
         mock_to_dict.assert_called_once_with(mock_job)
         assert result == expected_result
+
+@mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.cluster_info", new_callable=mock.PropertyMock)
+@mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.defer")
+def test_gke_start_pod_operator_passes_timeout_to_trigger(mock_defer, mock_cluster_info):
+    mock_cluster_info.return_value = ("https://mock-cluster-url", "mock-cert")
+
+    operator = GKEStartPodOperator(
+        task_id="gke_timeout_test",
+        project_id="my-gcp-project",
+        location="us-central1-c",
+        cluster_name="dev-cluster",
+        image="debian:bullseye",
+        cmds=["bash"],
+        arguments=["-c", "sleep 480"],
+        deferrable=True,
+        execution_timeout=timedelta(minutes=2),
+    )
+
+    operator.pod = mock.MagicMock()
+    operator.pod.metadata.name = "test-pod"
+    operator.pod.metadata.namespace = "default"
+
+    operator.invoke_defer_method()
+
+    mock_defer.assert_called_once()
+    call_args = mock_defer.call_args.kwargs
+    trigger = call_args.get("trigger")
+
+    assert hasattr(trigger, "timeout")
+    assert trigger.timeout is not None
