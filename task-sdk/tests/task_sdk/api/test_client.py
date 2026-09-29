@@ -1045,6 +1045,51 @@ class TestXCOMOperations:
                     key="key",
                 )
 
+    def test_xcom_get_not_found_logs_warning(self, cap_structlog):
+        """A missing XCom is an expected case, so it is logged at WARNING, not ERROR (#73175)."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/xcoms/dag_id/run_id/task_id/key":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "XCom not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.xcoms.get(dag_id="dag_id", run_id="run_id", task_id="task_id", key="key")
+
+        assert isinstance(result, XComResponse)
+        assert result.key == "key"
+        assert result.value is None
+        assert {"log_level": "warning", "event": "XCom not found"} in cap_structlog
+        assert {"log_level": "error", "event": "XCom not found"} not in cap_structlog
+
+    def test_xcom_get_sequence_item_not_found_logs_warning(self, cap_structlog):
+        """A missing XCom sequence item is logged at WARNING, not ERROR (#73175)."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/xcoms/dag_id/run_id/task_id/key/item/0":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "XCom not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.xcoms.get_sequence_item(
+                dag_id="dag_id", run_id="run_id", task_id="task_id", key="key", offset=0
+            )
+
+        assert isinstance(result, ErrorResponse)
+        assert result.error == ErrorType.XCOM_NOT_FOUND
+        assert {"log_level": "warning", "event": "XCom not found"} in cap_structlog
+        assert {"log_level": "error", "event": "XCom not found"} not in cap_structlog
+
     @pytest.mark.parametrize(
         "values",
         [
@@ -1295,6 +1340,28 @@ class TestAssetOperations:
 
         assert isinstance(result, ErrorResponse)
         assert result.error == ErrorType.ASSET_NOT_FOUND
+
+    def test_get_not_found_logs_warning(self, cap_structlog):
+        """A missing asset is an expected case, so it is logged at WARNING, not ERROR."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/assets/by-name":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "Asset not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.assets.get(name="missing_asset")
+
+        assert isinstance(result, ErrorResponse)
+        assert result.error == ErrorType.ASSET_NOT_FOUND
+        assert result.detail == {"name": "missing_asset"}
+        assert {"log_level": "warning", "event": "Asset not found"} in cap_structlog
+        assert {"log_level": "error", "event": "Asset not found"} not in cap_structlog
 
     def test_get_by_alias_returns_list(self):
         def handle_request(request: httpx.Request) -> httpx.Response:
