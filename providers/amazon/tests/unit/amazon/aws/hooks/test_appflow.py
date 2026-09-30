@@ -15,6 +15,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -71,9 +72,56 @@ def test_conn_attributes(hook):
 def test_run_flow(hook):
     with mock.patch("airflow.providers.amazon.aws.waiters.base_waiter.BaseBotoWaiter.waiter"):
         hook.run_flow(flow_name=FLOW_NAME, poll_interval=0)
-    hook.conn.describe_flow_execution_records.assert_called_with(flowName=FLOW_NAME)
+    hook.conn.describe_flow_execution_records.assert_called_with(flowName=FLOW_NAME, maxResults=100)
     assert hook.conn.describe_flow_execution_records.call_count == 1
     hook.conn.start_flow.assert_called_once_with(flowName=FLOW_NAME)
+
+
+def test_run_flow_paginated_log_execution_description(hook):
+    target_id = "ex_target"
+    page1 = {
+        "flowExecutions": [
+            {"executionId": f"other_{i}", "executionStatus": "Successful"} for i in range(20)
+        ],
+        "nextToken": "page2",
+    }
+    page2 = {
+        "flowExecutions": [
+            {
+                "executionId": target_id,
+                "executionStatus": "Successful",
+                "executionResult": {"recordsProcessed": 42},
+            }
+        ]
+    }
+
+    hook.conn.start_flow.return_value = {"executionId": target_id}
+    hook.conn.describe_flow_execution_records.side_effect = (
+        lambda **kw: page2 if kw.get("nextToken") == "page2" else page1
+    )
+
+    with mock.patch("airflow.providers.amazon.aws.waiters.base_waiter.BaseBotoWaiter.waiter"):
+        hook.run_flow(flow_name=FLOW_NAME, poll_interval=0)
+
+    assert hook.conn.describe_flow_execution_records.call_count == 2
+    hook.conn.describe_flow_execution_records.assert_called_with(
+        flowName=FLOW_NAME, maxResults=100, nextToken="page2"
+    )
+
+
+def test_run_flow_missing_execution_details_warning(hook):
+    missing_id = "missing_exec"
+    hook.conn.start_flow.return_value = {"executionId": missing_id}
+    hook.conn.describe_flow_execution_records.return_value = {
+        "flowExecutions": [{"executionId": "other_id", "executionStatus": "Successful"}]
+    }
+
+    with mock.patch.object(hook.log, "warning") as mock_warn:
+        with mock.patch("airflow.providers.amazon.aws.waiters.base_waiter.BaseBotoWaiter.waiter"):
+            hook.run_flow(flow_name=FLOW_NAME, poll_interval=0)
+
+        mock_warn.assert_called_once()
+        assert missing_id in mock_warn.call_args[0][1]
 
 
 def test_update_flow_filter(hook):
