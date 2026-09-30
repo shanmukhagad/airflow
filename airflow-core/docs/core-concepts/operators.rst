@@ -26,14 +26,14 @@ An Operator is conceptually a template for a predefined :doc:`Task <tasks>`, tha
 
         ping >> email
 
-Airflow has a very extensive set of operators available, with some built-in to the core or pre-installed providers. Some popular operators from core include:
+Airflow has a very extensive set of operators available, with some built into the core or pre-installed providers. Some popular operators from core include:
 
 - :class:`~airflow.providers.standard.operators.bash.BashOperator` - executes a bash command
 - :class:`~airflow.providers.standard.operators.python.PythonOperator` - calls an arbitrary Python function
-- Use the ``@task`` decorator to execute an arbitrary Python function. It doesn't support rendering jinja templates passed as arguments.
+- Use the ``@task`` decorator to execute an arbitrary Python function. It doesn't support rendering Jinja templates passed as arguments.
 
 .. note::
-    The ``@task`` decorator is the Taskflow equivalent of :class:`~airflow.providers.standard.operators.python.PythonOperator`
+    The ``@task`` decorator is the TaskFlow equivalent of :class:`~airflow.providers.standard.operators.python.PythonOperator`
     to execute Python callables with no template rendering in its arguments.
 
 For a list of all core operators, see: :doc:`Core Operators and Hooks Reference </operators-and-hooks-ref>`.
@@ -65,7 +65,7 @@ and transfers in our
 
 Jinja Templating
 ----------------
-Airflow leverages the power of `Jinja Templating <http://jinja.pocoo.org/docs/dev/>`_ and this can be a powerful tool to use in combination with :ref:`macros <templates-ref>`.
+Airflow leverages the power of `Jinja Templating <https://jinja.palletsprojects.com/>`_ and this can be a powerful tool to use in combination with :ref:`macros <templates-ref>`.
 
 For example, say you want to pass the start of the data interval as an environment variable to a Bash script using the ``BashOperator``:
 
@@ -84,7 +84,7 @@ Here, ``{{ ds }}`` is a templated variable, and because the ``env`` parameter of
 
 You can also pass in a callable instead when Python is more readable than a Jinja template. The callable must accept two named arguments ``context`` and ``jinja_env``:
 
-The ``context`` parameter is an Airflow's ``Context`` object that provides runtime information for the current task execution. Its contents can be accessed with Python's standard `dict syntax <https://docs.python.org/3/library/stdtypes.html#mapping-types-dict>`_. It includes all variables available in Jinja templates and is read-only from the perspective of template rendering - while you can access and use its values, modifications won't affect the task execution environment.
+The ``context`` parameter is an Airflow ``Context`` object that provides runtime information for the current task execution. Its contents can be accessed with Python's standard `dict syntax <https://docs.python.org/3/library/stdtypes.html#mapping-types-dict>`_. It includes all variables available in Jinja templates and is read-only from the perspective of template rendering - while you can access and use its values, modifications won't affect the task execution environment.
 
 For a complete list of available context variables see :ref:`Templates reference <templates:variables>`.
 
@@ -146,7 +146,7 @@ You can also use templating with nested fields, as long as these nested fields a
 .. note:: The ``template_fields`` property is a class variable and guaranteed to be of a ``Sequence[str]``
     type (i.e. a list or tuple of strings).
 
-Deep nested fields can also be substituted, as long as all intermediate fields are marked as template fields:
+Deeply nested fields can also be substituted, as long as all intermediate fields are marked as template fields:
 
 .. code-block:: python
 
@@ -176,7 +176,7 @@ Deep nested fields can also be substituted, as long as all intermediate fields a
     )
 
 
-You can pass custom options to the Jinja ``Environment`` when creating your Dag. One common usage is to avoid Jinja from dropping a trailing newline from a template string:
+You can pass custom options to the Jinja ``Environment`` when creating your Dag. One common usage is to prevent Jinja from dropping a trailing newline from a template string:
 
 .. code-block:: python
 
@@ -254,7 +254,7 @@ By default, all Jinja templates in ``template_fields`` are rendered as strings. 
         return json.loads(data_string)
 
 
-If a task depends on ``extract``, ``order_data`` argument is passed a string ``"{'1001': 301.27, '1002': 433.21, '1003': 502.22}"``:
+If a task depends on ``extract``, the ``order_data`` argument is passed a string ``"{'1001': 301.27, '1002': 433.21, '1003': 502.22}"``:
 
 .. code-block:: python
 
@@ -350,7 +350,7 @@ If you need to include a Jinja template expression (e.g., ``{{ ds }}``) literall
       dag=dag,
   )
 
-This ensures the f-string processing results in a string containing the literal double braces required by Jinja, which Airflow can then template correctly before execution. Failure to do this is a common issue for beginners and can lead to errors during DAG parsing or unexpected behavior at runtime when the templating does not occur as expected.
+This ensures the f-string processing results in a string containing the literal double braces required by Jinja, which Airflow can then template correctly before execution. Failure to do this is a common issue for beginners and can lead to errors during Dag parsing or unexpected behavior at runtime when the templating does not occur as expected.
 
 Pre- and post-execute methods
 -----------------------------
