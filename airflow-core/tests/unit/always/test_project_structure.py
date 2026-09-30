@@ -168,8 +168,6 @@ class TestProjectStructure:
             "providers/google/tests/unit/google/cloud/sensors/vertex_ai/test_feature_store.py",
             "providers/google/tests/unit/google/cloud/transfers/test_bigquery_to_sql.py",
             "providers/google/tests/unit/google/cloud/transfers/test_presto_to_gcs.py",
-            "providers/google/tests/unit/google/cloud/utils/test_bigquery.py",
-            "providers/google/tests/unit/google/cloud/utils/test_bigquery_get_data.py",
             "providers/google/tests/unit/google/common/hooks/test_operation_helpers.py",
             "providers/google/tests/unit/google/test_go_module_utils.py",
             "providers/http/tests/unit/http/test_exceptions.py",
