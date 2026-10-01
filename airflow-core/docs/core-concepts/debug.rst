@@ -126,10 +126,10 @@ Task execution logs in the Airflow UI can be verbose. When a task fails, routine
 
 1. Navigate to the **Grid View** or **Graph View** and select the failed task instance.
 2. Click the **Logs** tab.
-3. Use the **Log Level** dropdown selector to filter by severity:
+3. Use the search bar in the log viewer to filter logs by severity or keywords (e.g., search for ``ERROR`` or ``WARNING``):
    
    * **``ERROR`` / ``CRITICAL``:** Isolates explicit Python exceptions, syntax errors, and fatal job terminations.
-   * **``WARN``:** Highlights non-fatal execution warnings, such as deprecation notices or retry attempts.
+   * **``WARNING``:** Highlights non-fatal execution warnings, such as deprecation notices or retry attempts.
 
 Log Keyword Searching
 ---------------------
@@ -147,11 +147,10 @@ Inspecting XCom Payloads
 
 Tasks often fail downstream because upstream tasks pushed malformed or missing XCom data. You can verify the exact data passed between tasks directly in the UI.
 
-1. Select the upstream task instance that generated the data.
-2. Open the **XCom** tab.
-3. Inspect the key-value pairs to confirm the data format matches downstream expectations.
+1. Navigate to the failed or upstream task instance in the Airflow UI.
+2. Open the **XCom** section or tab to inspect the key-value pairs to confirm the data format matches downstream expectations.
 
-Alternatively, pull and log XCom data locally or inside a task using Python:
+Alternatively, pull and inspect XCom data safely inside a task using Python:
 
 .. code-block:: python
 
@@ -159,7 +158,10 @@ Alternatively, pull and log XCom data locally or inside a task using Python:
     def process_data(**context):
         # Retrieve XCom value pushed by 'extract_data' task
         raw_payload = context["task_instance"].xcom_pull(task_ids="extract_data")
-        print(f"DEBUG: Received XCom payload: {raw_payload}")
+        
+        # Log specific keys/structure rather than full raw payload to avoid log bloat and leak risks
+        if isinstance(raw_payload, dict):
+            print(f"DEBUG: Received XCom payload keys: {list(raw_payload.keys())}")
 
 
 Validating Connections & Variables
@@ -168,14 +170,18 @@ Validating Connections & Variables
 Missing or incorrectly named Airflow Connections and Variables are a frequent cause of ``AirflowException`` or connection timeouts at runtime.
 
 * **Connections:** Navigate to **Admin -> Connections** to verify that the target Connection ID matches the ``conn_id`` declared in your operator (e.g., ``postgres_default``). Use the **Test Connection** button to validate network accessibility and credentials.
-* **Variables:** Navigate to **Admin -> Variables** to ensure required runtime parameters exist. You can safely reference fallback values in code to prevent execution failures when variables are absent:
+* **Variables:** Navigate to **Admin -> Variables** to ensure required runtime parameters exist. Require explicit configuration in code to fail fast if a variable is missing:
 
 .. code-block:: python
 
+    from airflow.exceptions import AirflowException
     from airflow.models import Variable
 
-    # Provide a default value to prevent KeyError if variable is missing
-    api_endpoint = Variable.get("API_ENDPOINT", default_var="https://staging.api.com")
+    # Fail explicitly if configuration is missing to avoid unintended fallbacks
+    try:
+        api_endpoint = Variable.get("API_ENDPOINT")
+    except KeyError:
+        raise AirflowException("Required Variable 'API_ENDPOINT' is missing from Airflow environment.")
 
 
 Analyzing Historical Task Runs
