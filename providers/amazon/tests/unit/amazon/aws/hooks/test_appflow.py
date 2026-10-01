@@ -1,4 +1,3 @@
-#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -23,6 +22,7 @@ from unittest import mock
 from unittest.mock import ANY
 
 import pytest
+from botocore.exceptions import ClientError
 
 from airflow.providers.amazon.aws.hooks.appflow import AppflowHook
 
@@ -122,6 +122,38 @@ def test_run_flow_missing_execution_details_warning(hook):
 
         mock_warn.assert_called_once()
         assert missing_id in mock_warn.call_args[0][1]
+
+
+def test_run_flow_log_execution_description_client_error(hook):
+    target_id = "ex_target"
+    hook.conn.start_flow.return_value = {"executionId": target_id}
+    hook.conn.describe_flow_execution_records.side_effect = ClientError(
+        {"Error": {"Code": "InternalServerError", "Message": "AWS error"}},
+        "describe_flow_execution_records",
+    )
+
+    with mock.patch.object(hook.log, "warning") as mock_warn:
+        with mock.patch("airflow.providers.amazon.aws.waiters.base_waiter.BaseBotoWaiter.waiter"):
+            hook.run_flow(flow_name=FLOW_NAME, poll_interval=0)
+
+        mock_warn.assert_called_once()
+        assert "due to API error" in mock_warn.call_args[0][0]
+
+
+def test_run_flow_log_execution_description_max_pages_limit(hook):
+    target_id = "missing_id"
+    hook.conn.start_flow.return_value = {"executionId": target_id}
+    # Mock continuous pagination that never contains target_id
+    hook.conn.describe_flow_execution_records.return_value = {
+        "flowExecutions": [{"executionId": "other_id", "executionStatus": "Successful"}],
+        "nextToken": "next_page",
+    }
+
+    with mock.patch("airflow.providers.amazon.aws.waiters.base_waiter.BaseBotoWaiter.waiter"):
+        hook.run_flow(flow_name=FLOW_NAME, poll_interval=0)
+
+    # Verifies pagination stops at default max_pages=10 to avoid infinite loops and API throttling
+    assert hook.conn.describe_flow_execution_records.call_count == 10
 
 
 def test_update_flow_filter(hook):

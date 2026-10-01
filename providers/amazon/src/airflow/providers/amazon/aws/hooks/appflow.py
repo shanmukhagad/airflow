@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import ClientError
+
 from airflow.providers.amazon.aws.hooks.base_aws import AwsGenericHook
 from airflow.providers.amazon.aws.utils.waiter_with_logging import wait
 
@@ -80,16 +82,27 @@ class AppflowHook(AwsGenericHook["AppflowClient"]):
 
         return execution_id
 
-    def _log_execution_description(self, flow_name: str, execution_id: str) -> None:
+    def _log_execution_description(self, flow_name: str, execution_id: str, max_pages: int = 10) -> None:
         next_token = None
         exec_details = None
+        page_count = 0
 
-        while True:
+        while page_count < max_pages:
+            page_count += 1
             kwargs = {"flowName": flow_name, "maxResults": 100}
             if next_token:
                 kwargs["nextToken"] = next_token
 
-            response_desc = self.conn.describe_flow_execution_records(**kwargs)
+            try:
+                response_desc = self.conn.describe_flow_execution_records(**kwargs)
+            except ClientError as e:
+                self.log.warning(
+                    "Failed to fetch execution details for execution ID %s due to API error: %s",
+                    execution_id,
+                    e,
+                )
+                return
+
             for fe in response_desc.get("flowExecutions", []):
                 if fe.get("executionId") == execution_id:
                     exec_details = fe
