@@ -62,7 +62,6 @@ version = "3.3.2"
 dependencies = [
     "apache-airflow-task-sdk==1.3.2",
     "apache-airflow-core==3.3.2",
-    "paramiko>=3.5.1",
 ]
 
 packages = []
