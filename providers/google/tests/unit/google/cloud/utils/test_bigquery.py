@@ -36,6 +36,8 @@ def test_bq_cast_none_is_none(bq_type):
         ("true", "BOOLEAN", True),
         ("false", "BOOLEAN", False),
         ("unchanged", "STRING", "unchanged"),
+        ("unchanged", "UNKNOWN", "unchanged"),
+        # DATE is a real BigQuery type with no branch here, so it falls through as a string.
         ("2024-01-01", "DATE", "2024-01-01"),
     ],
 )
