@@ -68,7 +68,7 @@ from airflow.providers.google.cloud.operators.kubernetes_engine import (
 )
 
 from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 from airflow.providers.google.cloud.operators.kubernetes_engine import GKEStartPodOperator
 
@@ -1797,8 +1797,13 @@ class TestGKEResumeJobOperator:
 
 @mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.cluster_info", new_callable=mock.PropertyMock)
 @mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.defer")
-def test_gke_start_pod_operator_passes_timeout_to_trigger(mock_defer, mock_cluster_info):
+def test_gke_start_pod_operator_passes_exact_timeout_deadline_to_trigger(mock_defer, mock_cluster_info):
+    """Verify GKEStartPodOperator passes the exact calculated execution_timeout deadline to GKEStartPodTrigger (#71514)."""
     mock_cluster_info.return_value = ("https://mock-cluster-url", "mock-cert")
+    
+    execution_timeout = timedelta(minutes=2)
+    fake_start_time = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    expected_deadline = fake_start_time + execution_timeout
 
     operator = GKEStartPodOperator(
         task_id="gke_timeout_test",
@@ -1809,18 +1814,22 @@ def test_gke_start_pod_operator_passes_timeout_to_trigger(mock_defer, mock_clust
         cmds=["bash"],
         arguments=["-c", "sleep 480"],
         deferrable=True,
-        execution_timeout=timedelta(minutes=2),
+        execution_timeout=execution_timeout,
     )
-
+    
     operator.pod = mock.MagicMock()
     operator.pod.metadata.name = "test-pod"
     operator.pod.metadata.namespace = "default"
 
-    operator.invoke_defer_method()
+    # Freeze/mock trigger_start_time calculation to verify exact deadline
+    with mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.timezone.utcnow", return_value=fake_start_time):
+        operator.invoke_defer_method()
 
+    # 1. Assert defer was called
     mock_defer.assert_called_once()
-    call_args = mock_defer.call_args.kwargs
-    trigger = call_args.get("trigger")
 
-    assert hasattr(trigger, "timeout")
-    assert trigger.timeout is not None
+    # 2. Extract trigger instance passed to defer()
+    trigger = mock_defer.call_args.kwargs.get("trigger")
+
+    # 3. Assert exact calculated deadline match
+    assert trigger.timeout == expected_deadline, f"Expected trigger timeout to be {expected_deadline}, but got {trigger.timeout}"
