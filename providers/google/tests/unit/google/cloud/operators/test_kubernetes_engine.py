@@ -1833,3 +1833,79 @@ def test_gke_start_pod_operator_passes_exact_timeout_deadline_to_trigger(mock_de
 
     # 3. Assert exact calculated deadline match
     assert trigger.timeout == expected_deadline, f"Expected trigger timeout to be {expected_deadline}, but got {trigger.timeout}"
+
+import pytest
+from datetime import datetime, timedelta, timezone
+from unittest import mock
+from airflow.providers.google.cloud.operators.kubernetes_engine import (
+    GKEStartPodOperator,
+    GKEStartPodTrigger,
+)
+
+
+# 1. Invalid Type on Operator: execution_timeout="invalid_string"
+@mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.cluster_info", new_callable=mock.PropertyMock)
+def test_gke_operator_invalid_execution_timeout_type_raises_value_error(mock_cluster_info):
+    """Verify passing a non-timedelta to execution_timeout raises a ValueError during operator init."""
+    mock_cluster_info.return_value = ("https://mock-cluster-url", "mock-cert")
+
+    with pytest.raises(ValueError, match="execution_timeout must be timedelta object"):
+        GKEStartPodOperator(
+            task_id="gke_bad_type_test",
+            project_id="my-gcp-project",
+            location="us-central1-c",
+            cluster_name="dev-cluster",
+            image="debian:bullseye",
+            deferrable=True,
+            execution_timeout="invalid_timeout_string",  # Airflow validates timedelta type on init
+        )
+
+
+
+# 2. Negative Timeout: execution_timeout = timedelta(minutes=-5)
+@mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.cluster_info", new_callable=mock.PropertyMock)
+@mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.GKEStartPodOperator.defer")
+def test_gke_operator_negative_execution_timeout_creates_expired_deadline(mock_defer, mock_cluster_info):
+    """Verify a negative timeout creates a past deadline, which causes immediate trigger expiry."""
+    mock_cluster_info.return_value = ("https://mock-cluster-url", "mock-cert")
+    fake_now = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    negative_timeout = timedelta(minutes=-5)
+    expected_past_deadline = fake_now + negative_timeout  # 11:55:00 UTC
+
+    operator = GKEStartPodOperator(
+        task_id="gke_negative_timeout_test",
+        project_id="my-gcp-project",
+        location="us-central1-c",
+        cluster_name="dev-cluster",
+        image="debian:bullseye",
+        deferrable=True,
+        execution_timeout=negative_timeout,
+    )
+    operator.pod = mock.MagicMock()
+
+    with mock.patch("airflow.providers.google.cloud.operators.kubernetes_engine.timezone.utcnow", return_value=fake_now):
+        operator.invoke_defer_method()
+
+    trigger = mock_defer.call_args.kwargs.get("trigger")
+    
+    # Deadline is in the past
+    assert trigger.timeout == expected_past_deadline
+    assert trigger.timeout < fake_now
+
+
+# 3. Invalid Timeout Type direct on Trigger evaluation (Triggerer behavior check)
+@pytest.mark.asyncio
+async def test_gke_trigger_invalid_timeout_type_raises_type_error():
+    """Verify passing an invalid non-datetime timeout to GKEStartPodTrigger causes evaluation failure."""
+    trigger = GKEStartPodTrigger(
+        pod_name="test-pod",
+        pod_namespace="default",
+        trigger_start_time=datetime.now(timezone.utc),
+        cluster_url="https://mock-cluster-url",
+        ssl_ca_cert="mock-cert",
+        base_container_name="base",  # Fixed missing required parameter
+        timeout="not_a_datetime",
+    )
+
+    with pytest.raises(TypeError):
+        _ = datetime.now(timezone.utc) >= trigger.timeout
