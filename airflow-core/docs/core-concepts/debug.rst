@@ -112,3 +112,83 @@ Run ``python -m pdb <path to Dag file>.py`` for an interactive debugging experie
       dag.test()
 
 2. Run / debug the Dag file.
+
+
+Real-World Debugging Strategies
+================================
+
+While CLI commands like ``dag.test()`` are useful during initial development, diagnosing issues in deployed environments requires analyzing runtime state, task logs, and environment configurations.
+
+Filtering Task Logs by Severity
+-------------------------------
+
+Task execution logs in the Airflow UI can be verbose. When a task fails, routine ``INFO`` messages can obscure the underlying stack trace.
+
+1. Navigate to the **Grid View** or **Graph View** and select the failed task instance.
+2. Click the **Logs** tab.
+3. Use the search bar in the log viewer to filter logs by severity or keywords (e.g., search for ``ERROR`` or ``WARNING``):
+   
+   * **``ERROR`` / ``CRITICAL``:** Isolates explicit Python exceptions, syntax errors, and fatal job terminations.
+   * **``WARNING``:** Highlights non-fatal execution warnings, such as deprecation notices or retry attempts.
+
+Log Keyword Searching
+---------------------
+
+To quickly locate intermittent errors in long-running tasks, use the log search field to query specific runtime indicators. 
+
+Common search patterns include:
+
+* **Exception Types:** Search for ``Traceback``, ``KeyError``, ``TypeError``, or ``DatabaseError``.
+* **HTTP / API Failures:** Search for status codes such as ``401``, ``403``, ``500``, or network keywords like ``ConnectionRefusedError`` and ``Timeout``.
+* **Resource Limits:** Search for ``Out of Memory``, ``OOMKilled``, or SIGKILL signals (``Exit code 137``).
+
+Inspecting XCom Payloads
+------------------------
+
+Tasks often fail downstream because upstream tasks pushed malformed or missing XCom data. You can verify the exact data passed between tasks directly in the UI.
+
+1. Navigate to the failed or upstream task instance in the Airflow UI.
+2. Open the **XCom** section or tab to inspect the key-value pairs to confirm the data format matches downstream expectations.
+
+Alternatively, pull and inspect XCom data safely inside a task using Python:
+
+.. code-block:: python
+
+    @task
+    def process_data(**context):
+        # Retrieve XCom value pushed by 'extract_data' task
+        raw_payload = context["task_instance"].xcom_pull(task_ids="extract_data")
+        
+        # Log specific keys/structure rather than full raw payload to avoid log bloat and leak risks
+        if isinstance(raw_payload, dict):
+            print(f"DEBUG: Received XCom payload keys: {list(raw_payload.keys())}")
+
+
+Validating Connections & Variables
+----------------------------------
+
+Missing or incorrectly named Airflow Connections and Variables are a frequent cause of ``AirflowException`` or connection timeouts at runtime.
+
+* **Connections:** Navigate to **Admin -> Connections** to verify that the target Connection ID matches the ``conn_id`` declared in your operator (e.g., ``postgres_default``). Use the **Test Connection** button to validate network accessibility and credentials.
+* **Variables:** Navigate to **Admin -> Variables** to ensure required runtime parameters exist. Require explicit configuration in code to fail fast if a variable is missing:
+
+.. code-block:: python
+
+    from airflow.exceptions import AirflowException
+    from airflow.models import Variable
+
+    # Fail explicitly if configuration is missing to avoid unintended fallbacks
+    try:
+        api_endpoint = Variable.get("API_ENDPOINT")
+    except KeyError:
+        raise AirflowException("Required Variable 'API_ENDPOINT' is missing from Airflow environment.")
+
+
+Analyzing Historical Task Runs
+------------------------------
+
+Recurring or seasonal failures often point to external system bottlenecks rather than DAG code bugs.
+
+1. Open the **Grid View** to view execution history across past DAG runs.
+2. Check the duration chart to identify tasks with sudden spikes in execution time (e.g., database lock contention).
+3. Review the **Gantt Chart** or **Details** tab to check task attempt counts and verify if task retries (``retries=3``) are triggering repeatedly due to transient network drops.
