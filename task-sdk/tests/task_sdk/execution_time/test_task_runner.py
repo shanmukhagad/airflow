@@ -177,6 +177,7 @@ from airflow.sdk.execution_time.task_runner import (
     _make_task_span,
     _push_xcom_if_needed,
     _register_deserialization_allowed_classes,
+    _render_map_index,
     _run_execute_callable,
     _serialize_outlet_events,
     _xcom_push,
@@ -2033,6 +2034,35 @@ def test_execute_success_task_with_rendered_map_index(create_runtime_ti, mock_su
     run(ti, ti.get_template_context(), log=mock.MagicMock())
 
     assert ti.rendered_map_index == "Hello! test_run"
+
+
+def test_render_map_index_with_numeric_result(create_runtime_ti):
+    """Test that a numeric rendered map index is converted to a string."""
+
+    dag = DAG(
+        dag_id="dag_with_numeric_map_index",
+        start_date=timezone.datetime(2024, 12, 3),
+        render_template_as_native_obj=True,
+    )
+
+    task = PythonOperator(
+        task_id="test_task",
+        python_callable=lambda: "test function",
+        map_index_template="123",
+        dag=dag,
+    )
+
+    ti = create_runtime_ti(task=task, map_index=0)
+
+    context = ti.get_template_context()
+
+    rendered_map_index = _render_map_index(
+        context=context,
+        ti=ti,
+        log=mock.MagicMock(),
+    )
+    assert rendered_map_index == "123"
+    assert isinstance(rendered_map_index, str)
 
 
 def test_execute_failed_task_with_rendered_map_index(create_runtime_ti, mock_supervisor_comms):
