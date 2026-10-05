@@ -29,7 +29,7 @@ class RBACRefDirective(Directive):
             if name.startswith("is_authorized_")
         ]
 
-        # Methods ko alphabetical order mein sort karna
+        # Sort Methods in alphabetical order
         auth_methods.sort(key=lambda x: x[0])
 
         if not auth_methods:
