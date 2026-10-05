@@ -184,6 +184,7 @@ def get_dogstatsd_logger(
         dogstatsd_kwargs["port"] = port
     if namespace is not None:
         dogstatsd_kwargs["namespace"] = namespace
+    dogstatsd_kwargs["use_ms"] = True
     dogstatsd = DogStatsd(**dogstatsd_kwargs)
     metric_tags_validator = PatternBlockListValidator(statsd_disabled_tags)
     validator = get_validator(metrics_allow_list, metrics_block_list)
