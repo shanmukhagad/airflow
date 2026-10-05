@@ -162,9 +162,16 @@ def _mysql_drop_unique_constraints_on_ab_register_user_email() -> str:
 
 def _find_unique_constraint_names(bind, table_name: str, column_name: str) -> list[str]:
     """Names of the unique constraints on ``table_name`` that cover ``column_name``."""
+    try:
+        unique_constraints = sa.inspect(bind).get_unique_constraints(table_name)
+    except sa.exc.SQLAlchemyError as e:
+        raise RuntimeError(
+            f"Failed to inspect unique constraints for table '{table_name}'."
+        ) from e
+
     return [
         uq["name"]
-        for uq in sa.inspect(bind).get_unique_constraints(table_name)
+        for uq in unique_constraints
         if uq["name"] is not None and column_name in uq["column_names"]
     ]
 
@@ -210,9 +217,18 @@ def _drop_unique_constraint_if_exists(table_name: str, constraint_name: str) -> 
 def _resolve_fk_name(bind, table_name: str, column_name: str, default: str) -> str:
     if bind is None:
         return default
-    for fk in sa.inspect(bind).get_foreign_keys(table_name):
+
+    try:
+        foreign_keys = sa.inspect(bind).get_foreign_keys(table_name)
+    except sa.exc.SQLAlchemyError as e:
+        raise RuntimeError(
+            f"Failed to inspect foreign keys for table '{table_name}'."
+        ) from e
+
+    for fk in foreign_keys:
         if fk["constrained_columns"] == [column_name]:
             return fk["name"] or default
+
     return default
 
 
@@ -241,8 +257,16 @@ def _drop_index_if_exists(table_name: str, index_name: str) -> None:
                     )
                 )
             )
-        elif any(idx["name"] == index_name for idx in sa.inspect(bind).get_indexes(table_name)):
-            op.drop_index(index_name, table_name=table_name)
+        else:
+            try:
+                indexes = sa.inspect(bind).get_indexes(table_name)
+            except sa.exc.SQLAlchemyError as e:
+                raise RuntimeError(
+                    f"Failed to inspect indexes for table '{table_name}'."
+                ) from e
+
+            if any(idx["name"] == index_name for idx in indexes):
+                op.drop_index(index_name, table_name=table_name)
     else:
         op.drop_index(index_name, table_name=table_name, if_exists=True)
 
@@ -269,9 +293,15 @@ def upgrade() -> None:
     # These indexes exist in the ORM (models/__init__.py) so they may already be present
     # on ORM-created databases. Guard with an existence check for all paths including offline.
     if bind is not None:
-        existing_pvr_indexes = {
-            idx["name"] for idx in sa.inspect(bind).get_indexes("ab_permission_view_role")
-        }
+        try:
+            existing_pvr_indexes = {
+                idx["name"] for idx in sa.inspect(bind).get_indexes("ab_permission_view_role")
+            }
+        except sa.exc.SQLAlchemyError as e:
+            raise RuntimeError(
+                "Failed to inspect indexes for table 'ab_permission_view_role'."
+            ) from e
+
         if "idx_permission_view_id" not in existing_pvr_indexes:
             op.create_index("idx_permission_view_id", "ab_permission_view_role", ["permission_view_id"])
         if "idx_role_id" not in existing_pvr_indexes:
