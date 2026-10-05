@@ -105,6 +105,7 @@ extensions.extend(
         "sphinxcontrib.httpdomain",
         "extra_files_with_substitutions",
         "generate_erd",
+        "sphinx_exts.rbac_ref", # new extension added
     ]
 )
 
