@@ -57,6 +57,22 @@ from airflow.utils.log.logging_mixin import remove_escape_codes
 from airflow.utils.session import NEW_SESSION, provide_session
 from airflow.utils.state import TaskInstanceState
 
+  # Define infrastructure / pre-execution failure causes
+INFRA_FAILURE_REASONS = {
+    "Evicted",
+    "NodeShutdown",
+    "NodeAffinity",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "InvalidImageName",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+    "Preempted",
+    "OOMKilled",
+    "None",
+    None,
+}
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -492,9 +508,9 @@ class KubernetesExecutor(BaseExecutor):
         failure_details = results.failure_details
 
         termination_reason: str | None = None
+        is_infra_failure = False
 
         if state == TaskInstanceState.FAILED:
-            # Use pre-collected failure details from the watcher to avoid additional API calls
             if failure_details:
                 pod_status = failure_details.get("pod_status")
                 pod_reason = failure_details.get("pod_reason")
@@ -508,24 +524,44 @@ class KubernetesExecutor(BaseExecutor):
 
                 termination_reason = f"Pod failed because of {pod_reason}"
 
-                task_key_str = f"{key.dag_id}.{key.task_id}.{key.try_number}"
-                self.log.warning(
-                    "Task %s failed in pod %s/%s. Pod phase: %s, reason: %s, message: %s, "
-                    "container_type: %s, container_name: %s, container_state: %s, container_reason: %s, "
-                    "container_message: %s, exit_code: %s",
-                    task_key_str,
-                    namespace,
-                    pod_name,
-                    pod_status,
-                    pod_reason,
-                    pod_message,
-                    container_type,
-                    container_name,
-                    container_state,
-                    container_reason,
-                    container_message,
-                    exit_code,
+                # Detect infrastructure / pre-execution failure
+                is_infra_failure = (
+                    pod_reason in INFRA_FAILURE_REASONS
+                    or container_state == "waiting"
+                    or container_reason in INFRA_FAILURE_REASONS
                 )
+
+                task_key_str = f"{key.dag_id}.{key.task_id}.{key.try_number}"
+                if is_infra_failure:
+                    self.log.warning(
+                        "Task %s encountered an infrastructure failure in pod %s/%s. Pod phase: %s, "
+                        "pod_reason: %s, container_state: %s, container_reason: %s. Re-queuing task without consuming retry attempt.",
+                        task_key_str,
+                        namespace,
+                        pod_name,
+                        pod_status,
+                        pod_reason,
+                        container_state,
+                        container_reason,
+                    )
+                else:
+                    self.log.warning(
+                        "Task %s failed in pod %s/%s. Pod phase: %s, reason: %s, message: %s, "
+                        "container_type: %s, container_name: %s, container_state: %s, container_reason: %s, "
+                        "container_message: %s, exit_code: %s",
+                        task_key_str,
+                        namespace,
+                        pod_name,
+                        pod_status,
+                        pod_reason,
+                        pod_message,
+                        container_type,
+                        container_name,
+                        container_state,
+                        container_reason,
+                        container_message,
+                        exit_code,
+                    )
             else:
                 task_key_str = f"{key.dag_id}.{key.task_id}.{key.try_number}"
                 self.log.warning(
@@ -533,8 +569,6 @@ class KubernetesExecutor(BaseExecutor):
                 )
 
         if state == ADOPTED:
-            # When the task pod is adopted by another executor,
-            # then remove the task from the current executor running queue.
             try:
                 self.running.remove(key)
             except KeyError:
@@ -564,7 +598,6 @@ class KubernetesExecutor(BaseExecutor):
             self.log.debug("TI key not in running, not adding to event_buffer: %s", key)
             return
 
-        # If we don't have a TI state, look it up from the db. event_buffer expects the TI state
         if state is None:
             from airflow.models.taskinstance import TaskInstance
 
@@ -575,7 +608,11 @@ class KubernetesExecutor(BaseExecutor):
                 state = None
             state = TaskInstanceState(state) if state else None
 
-        self.event_buffer[key] = state, termination_reason
+        # --- UPDATE EVENT BUFFER ---
+        if is_infra_failure:
+            self.event_buffer[key] = TaskInstanceState.QUEUED, f"Infrastructure failure: {termination_reason}"
+        else:
+            self.event_buffer[key] = state, termination_reason
 
     def _get_pod_namespace(self, ti: TaskInstance):
         pod_override = (ti.executor_config or {}).get("pod_override")
