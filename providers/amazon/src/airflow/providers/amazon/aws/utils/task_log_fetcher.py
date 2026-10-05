@@ -111,8 +111,6 @@ class AwsTaskLogFetcher(Thread):
                     current_timestamp_event = datetime.fromtimestamp(
                         log_event["timestamp"] / 1000.0, tz=timezone.utc
                     )
-                    if current_timestamp_event == prev_timestamp_event:
-                        time.sleep(0.001)  # Yeh 1 millisecond hai, thread ko block nahi karega
                         
                     level = _parse_log_level(log_event["message"])
                     self.logger.log(level, self.event_to_str(log_event))
