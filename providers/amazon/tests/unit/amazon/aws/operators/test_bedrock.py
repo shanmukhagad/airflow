@@ -624,6 +624,82 @@ class TestBedrockCreateKnowledgeBaseOperator:
     def test_template_fields(self):
         validate_template_fields(self.operator)
 
+    def test_create_managed_knowledge_base(self, mock_conn):
+        """Test creating a MANAGED Knowledge Base without storage_config."""
+        mock_conn.create_knowledge_base.return_value = {
+            "knowledgeBase": {"knowledgeBaseId": "TEST_MANAGED_KB_ID"}
+        }
+
+        operator = BedrockCreateKnowledgeBaseOperator(
+            task_id="create_managed_kb",
+            name="my-managed-kb",
+            role_arn="arn:aws:iam::123456789012:role/my-role",
+            knowledge_base_type="MANAGED",
+            wait_for_completion=False,
+        )
+
+        kb_id = operator.execute(context={})
+
+        assert kb_id == "TEST_MANAGED_KB_ID"
+        # Verify that storageConfiguration is NOT passed in the API call
+        mock_conn.create_knowledge_base.assert_called_once_with(
+            name="my-managed-kb",
+            roleArn="arn:aws:iam::123456789012:role/my-role",
+            knowledgeBaseConfiguration={
+                "type": "MANAGED",
+                "managedKnowledgeBaseConfiguration": {"embeddingModeType": "MANAGED"},
+            },
+        )
+
+    @pytest.mark.parametrize(
+        ("embedding_arn", "storage"),
+        [
+            (None, {"type": "OPENSEARCH_SERVERLESS"}),
+            ("arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1", None),
+            (None, None),
+        ],
+    )
+    def test_vector_kb_missing_required_params_raises(self, embedding_arn, storage):
+        """Test that VECTOR knowledge base raises ValueError if required params are missing."""
+        with pytest.raises(ValueError, match="embedding_model_arn and storage_config are required"):
+            BedrockCreateKnowledgeBaseOperator(
+                task_id="create_vector_kb_invalid",
+                name="invalid-vector-kb",
+                role_arn="role-arn",
+                knowledge_base_type="VECTOR",
+                embedding_model_arn=embedding_arn,
+                storage_config=storage,
+            )
+
+    def test_unsupported_knowledge_base_type_raises(self):
+        """Test that passing an invalid knowledge_base_type raises ValueError."""
+        with pytest.raises(ValueError, match="Unsupported knowledge_base_type"):
+            BedrockCreateKnowledgeBaseOperator(
+                task_id="create_invalid_kb",
+                name="invalid-kb",
+                role_arn="role-arn",
+                knowledge_base_type="INVALID_TYPE",
+            )
+
+    def test_managed_kb_does_not_retry_on_index_error(self, mock_conn):
+        """Test that MANAGED Knowledge Base raises error immediately without retrying index propagation."""
+        validation_error = self._create_validation_error("no such index [bedrock-kb-index]")
+        mock_conn.create_knowledge_base.side_effect = [validation_error]
+
+        operator = BedrockCreateKnowledgeBaseOperator(
+            task_id="create_managed_kb",
+            name="my-managed-kb",
+            role_arn="arn:aws:iam::123456789012:role/my-role",
+            knowledge_base_type="MANAGED",
+            wait_for_completion=False,
+        )
+
+        with pytest.raises(ClientError):
+            operator.execute(context={})
+
+        # Should only call API ONCE and fail immediately without sleeping/retrying
+        assert mock_conn.create_knowledge_base.call_count == 1
+
     def _create_validation_error(self, message: str) -> ClientError:
         """Helper to create ValidationException with specific message."""
         return ClientError(
