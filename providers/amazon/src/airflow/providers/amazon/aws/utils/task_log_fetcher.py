@@ -98,33 +98,40 @@ class AwsTaskLogFetcher(Thread):
 
         self.hook = AwsLogsHook(aws_conn_id=aws_conn_id, region_name=region_name)
 
-    def run(self) -> None:
-        continuation_token = AwsLogsHook.ContinuationToken()
-        prev_timestamp_event = None
+    	
+    import asyncio
+    from asgiref.sync import sync_to_async
+    async def run(self) -> None:
+            continuation_token = AwsLogsHook.ContinuationToken()
+            prev_timestamp_event = None
 
-        # 1. Helper function for loop call
-        def _fetch_and_log():
-            log_events = self._get_log_events(continuation_token)
-            for log_event in log_events:
-                current_timestamp_event = datetime.fromtimestamp(
-                    log_event["timestamp"] / 1000.0, tz=timezone.utc
-                )
-                if current_timestamp_event == prev_timestamp_event:
-                    # When multiple events have the same timestamp...
-                    time.sleep(0.001)
-                level = _parse_log_level(log_event["message"])
-                self.logger.log(level, self.event_to_str(log_event))
-                prev_timestamp_event = current_timestamp_event
+            # 1. Helper function for fetching and logging (Async)
+            async def _fetch_and_log():
+                nonlocal prev_timestamp_event
+                
+                #   API called 
+                log_events = await sync_to_async(self._get_log_events)(continuation_token)
+                
+                for log_event in log_events:
+                    current_timestamp_event = datetime.fromtimestamp(
+                        log_event["timestamp"] / 1000.0, tz=timezone.utc
+                    )
+                    if current_timestamp_event == prev_timestamp_event:
+                        # asyncio.sleep converted
+                        await asyncio.sleep(0.001)
+                        
+                    level = _parse_log_level(log_event["message"])
+                    self.logger.log(level, self.event_to_str(log_event))
+                    prev_timestamp_event = current_timestamp_event
 
-        # 2. loop starts
-        while not self.is_stopped():
-            time.sleep(self.fetch_interval.total_seconds())
-            _fetch_and_log()
+            # 2. Main loop
+            while not self.is_stopped():
+                # time.sleep converted into asyncio.sleep.
+                await asyncio.sleep(self.fetch_interval.total_seconds())
+                await _fetch_and_log()
 
-        print("\n\n=====> loop breaks , and final call is done  <=====\n")
-            
-        # 3. THE FIX: Loop breaks , Calling a final time 
-        _fetch_and_log()
+            # 3. Loop breaks, Calling a final time (Aapka original bug fix)
+            await _fetch_and_log()
 
 
     def _get_log_events(self, skip_token: AwsLogsHook.ContinuationToken | None = None) -> Generator:
