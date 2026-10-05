@@ -98,27 +98,21 @@ class AwsTaskLogFetcher(Thread):
 
         self.hook = AwsLogsHook(aws_conn_id=aws_conn_id, region_name=region_name)
 
-    	
-    import asyncio
-    from asgiref.sync import sync_to_async
-    async def run(self) -> None:
+    def run(self) -> None:
             continuation_token = AwsLogsHook.ContinuationToken()
             prev_timestamp_event = None
 
-            # 1. Helper function for fetching and logging (Async)
-            async def _fetch_and_log():
+            # 1. Helper function
+            def _fetch_and_log():
                 nonlocal prev_timestamp_event
-                
-                #   API called 
-                log_events = await sync_to_async(self._get_log_events)(continuation_token)
+                log_events = self._get_log_events(continuation_token)
                 
                 for log_event in log_events:
                     current_timestamp_event = datetime.fromtimestamp(
                         log_event["timestamp"] / 1000.0, tz=timezone.utc
                     )
                     if current_timestamp_event == prev_timestamp_event:
-                        # asyncio.sleep converted
-                        await asyncio.sleep(0.001)
+                        time.sleep(0.001)  # Yeh 1 millisecond hai, thread ko block nahi karega
                         
                     level = _parse_log_level(log_event["message"])
                     self.logger.log(level, self.event_to_str(log_event))
@@ -126,12 +120,13 @@ class AwsTaskLogFetcher(Thread):
 
             # 2. Main loop
             while not self.is_stopped():
-                # time.sleep converted into asyncio.sleep.
-                await asyncio.sleep(self.fetch_interval.total_seconds())
-                await _fetch_and_log()
+                # THE FIX: Threading non-blocking wait.
+                if self._event.wait(timeout=self.fetch_interval.total_seconds()):
+                    break
+                _fetch_and_log()
 
-            # 3. Loop breaks, Calling a final time (Aapka original bug fix)
-            await _fetch_and_log()
+            # 3. Final call after loop breaks
+            _fetch_and_log()
 
 
     def _get_log_events(self, skip_token: AwsLogsHook.ContinuationToken | None = None) -> Generator:
