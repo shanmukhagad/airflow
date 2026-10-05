@@ -822,3 +822,27 @@ def test_fold_scheduling():
         pendulum.datetime(2023, 10, 29, 1, 30, tz=utc),
         pendulum.datetime(2023, 10, 29, 2, 0, tz=utc),  # Locally 3am (not DST).
     )
+
+
+def test_mid_period_deployment_no_catchup_preserves_active_interval():
+    """
+    Test that mid-period deployment with catchup=False retains active data interval
+    instead of skipping ~48 hours ahead (A2-83).
+    """
+    import pendulum
+    import time_machine
+
+    timetable = CronDataIntervalTimetable("@daily", timezone="UTC")
+    deployment_time = pendulum.datetime(2026, 10, 1, 3, 0, tz="UTC")
+    restriction = TimeRestriction(earliest=deployment_time, latest=None, catchup=False)
+
+    with time_machine.travel(deployment_time):
+        info = timetable.next_dagrun_info(
+            last_automated_data_interval=None,
+            restriction=restriction,
+        )
+
+    assert info == DagRunInfo.interval(
+        start=pendulum.datetime(2026, 10, 1, 0, 0, tz="UTC"),
+        end=pendulum.datetime(2026, 10, 2, 0, 0, tz="UTC"),
+    )
