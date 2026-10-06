@@ -2313,3 +2313,38 @@ class TestHookLevelLineage(_BigQueryBaseTestClass):
         )
 
         mock_send_lineage.assert_called_once_with(context=self.hook, job=mock_job_instance)
+
+
+@pytest.mark.parametrize("resource_kind", ["Table", "TableReference", "TableListItem"])
+def test_create_table_accepts_non_dict_resources(monkeypatch, resource_kind):
+    """create_table() must accept Table, TableReference and TableListItem, not only dict."""
+    from unittest import mock as _mock
+
+    from google.cloud.bigquery import Table, TableReference
+    from google.cloud.bigquery.table import TableListItem
+
+    monkeypatch.setenv("AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT", "google-cloud-platform://")
+    mock_get_client = _mock.MagicMock()
+    monkeypatch.setattr(BigQueryHook, "get_client", mock_get_client)
+
+    resources = {
+        "Table": lambda: Table("project.dataset.table"),
+        "TableReference": lambda: TableReference.from_string("project.dataset.table"),
+        "TableListItem": lambda: TableListItem(
+            {"tableReference": {"projectId": "project", "datasetId": "dataset", "tableId": "table"}}
+        ),
+    }
+
+    BigQueryHook().create_table(
+        project_id="project",
+        dataset_id="dataset",
+        table_id="table",
+        table_resource=resources[resource_kind](),
+        schema_fields=[{"name": "a", "type": "STRING"}],
+    )
+
+    created = mock_get_client.return_value.create_table.call_args.kwargs["table"]
+    assert created.project == "project"
+    assert created.dataset_id == "dataset"
+    assert created.table_id == "table"
+    assert [f.name for f in created.schema] == ["a"]
