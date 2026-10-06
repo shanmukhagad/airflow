@@ -29,6 +29,7 @@ from airflow.timetables.base import DagRunInfo, DataInterval, Timetable
 
 if TYPE_CHECKING:
     from airflow.timetables.base import TimeRestriction
+    from airflow.utils.types import DagRunType
 
 Delta = datetime.timedelta | relativedelta
 
@@ -153,6 +154,24 @@ class CronDataIntervalTimetable(CronMixin, _DataIntervalTimetable):
         from airflow.serialization.encoders import encode_timezone
 
         return {"expression": self._expression, "timezone": encode_timezone(self._timezone)}
+
+    def generate_run_id(
+        self,
+        *,
+        run_type: DagRunType,
+        run_after: DateTime,
+        data_interval: DataInterval | None,
+        **extra: Any,
+    ) -> str:
+        if data_interval is not None:
+            return run_type.generate_run_id(suffix=data_interval.start.isoformat())
+
+        return super().generate_run_id(
+            run_type=run_type,
+            run_after=run_after,
+            data_interval=data_interval,
+            **extra,
+        )
 
     def _skip_to_latest(self, earliest: DateTime | None) -> DateTime:
         """
