@@ -57,6 +57,20 @@ def on_task_instance_failed(
 
 
 @hookspec
+def on_task_instance_up_for_retry(
+    previous_state: TaskInstanceState | None,
+    task_instance: RuntimeTaskInstance | TaskInstance,
+    error: None | str | BaseException,
+):
+    """
+    Execute when a task instance fails and is set to UP_FOR_RETRY because retries remain.
+
+    This is in addition to ``on_task_instance_failed``, which still fires for both retries and
+    terminal failures. previous_state can be None.
+    """
+
+
+@hookspec
 def on_task_instance_skipped(
     previous_state: TaskInstanceState | None,
     task_instance: RuntimeTaskInstance | TaskInstance,
