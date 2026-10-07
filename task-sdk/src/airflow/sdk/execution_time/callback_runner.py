@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import argparse
 import inspect
+import json
 import logging
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, cast
 
@@ -70,23 +73,7 @@ def create_executable_runner(
     *,
     logger: logging.Logger | Logger,
 ) -> _ExecutionCallableRunner[P, R]:
-    """
-    Run an execution callable against a task context and given arguments.
-
-    If the callable is a simple function, this simply calls it with the supplied
-    arguments (including the context). If the callable is a generator function,
-    the generator is exhausted here, with the yielded values getting fed back
-    into the task context automatically for execution.
-
-    This convoluted implementation of inner class with closure is so *all*
-    arguments passed to ``run()`` can be forwarded to the wrapped function. This
-    is particularly important for the argument "self", which some use cases
-    need to receive. This is not possible if this is implemented as a normal
-    class, where "self" needs to point to the runner object, not the object
-    bounded to the inner callable.
-
-    :meta private:
-    """
+    """Run an execution callable against a task context and given arguments."""
 
     class _ExecutionCallableRunnerImpl(_ExecutionCallableRunner):
         @staticmethod
@@ -132,23 +119,7 @@ def create_async_executable_runner(
     *,
     logger: logging.Logger | Logger,
 ) -> _AsyncExecutionCallableRunner[P, R]:
-    """
-    Run an async execution callable against a task context and given arguments.
-
-    If the callable is a simple function, this simply calls it with the supplied
-    arguments (including the context). If the callable is a generator function,
-    the generator is exhausted here, with the yielded values getting fed back
-    into the task context automatically for execution.
-
-    This convoluted implementation of inner class with closure is so *all*
-    arguments passed to ``run()`` can be forwarded to the wrapped function. This
-    is particularly important for the argument "self", which some use cases
-    need to receive. This is not possible if this is implemented as a normal
-    class, where "self" needs to point to the runner object, not the object
-    bounded to the inner callable.
-
-    :meta private:
-    """
+    """Run an async execution callable against a task context and given arguments."""
 
     class _AsyncExecutionCallableRunnerImpl(_AsyncExecutionCallableRunner):
         @staticmethod
@@ -172,3 +143,40 @@ def create_async_executable_runner(
             return cast("R", results)
 
     return cast("_AsyncExecutionCallableRunner[P, R]", _AsyncExecutionCallableRunnerImpl)
+
+
+def run_callback(request: Any) -> None:
+    """Execute a callback payload inside the current subprocess."""
+    log = logging.getLogger(__name__)
+    log.info("Executing callback for task %s", getattr(request, "ti_key", "unknown"))
+
+    if hasattr(request, "execute"):
+        request.execute()
+
+
+def _main(args: list[str] | None = None) -> None:
+    """
+    Named, importable entry point for callback subprocesses launched via exec.
+
+    Acts as the entry point when `[core] execute_tasks_new_python_interpreter` is enabled.
+    """
+    parser = argparse.ArgumentParser(description="Airflow Task Callback Runner")
+    parser.add_argument(
+        "--callback-payload",
+        type=str,
+        required=False,
+        help="JSON-serialized callback payload",
+    )
+
+    parsed_args = parser.parse_args(args)
+
+    try:
+        raw_payload = json.loads(parsed_args.callback_payload) if parsed_args.callback_payload else {}
+        run_callback(raw_payload)
+    except Exception as e:
+        logging.exception("Failed to execute callback subprocess: %s", e)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    _main()
