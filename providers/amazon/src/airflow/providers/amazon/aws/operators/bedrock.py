@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from botocore.exceptions import ClientError
 
+from airflow.providers.amazon.aws.auth_manager.constants import (
+    KNOWLEDGE_BASE_TYPE_MANAGED,
+    KNOWLEDGE_BASE_TYPE_VECTOR,
+)
+
 from airflow.providers.amazon.aws.hooks.bedrock import (
     BedrockAgentCoreControlHook,
     BedrockAgentCoreHook,
@@ -679,8 +684,8 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
     :param wait_for_indexing: Vector indexing can take some time and there is no apparent way to check the state
         before trying to create the Knowledge Base. If this is True, and creation fails due to the index not
         being available, the operator will wait and retry. (default: True) (templated)
-    :param indexing_error_retry_delay: Seconds between retries if an index error is encountered. (default 10) (templated)
-    :param indexing_error_max_attempts: Maximum number of times to retry when encountering an index error. (default 20) (templated)
+    :param indexing_error_retry_delay: Seconds between retries if an index error is encountered. (templated)
+    :param indexing_error_max_attempts: Maximum number of times to retry when encountering an index error. (templated)
     :param create_knowledge_base_kwargs: Any additional optional parameters to pass to the API call. (templated)
     """
 
@@ -704,17 +709,17 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         role_arn: str,
         embedding_model_arn: str | None = None,
         storage_config: dict[str, Any] | None = None,
-        knowledge_base_type: str = "VECTOR",
+        knowledge_base_type: str = KNOWLEDGE_BASE_TYPE_VECTOR,
         create_knowledge_base_kwargs: dict[str, Any] | None = None,
         wait_for_indexing: bool = True,
-        indexing_error_retry_delay: int = 10,
-        indexing_error_max_attempts: int = 20,
+        indexing_error_retry_delay: int = conf.getint("bedrock", "indexing_error_retry_delay", fallback=10),
+        indexing_error_max_attempts: int = conf.getint("bedrock", "indexing_error_max_attempts", fallback=20),
         wait_for_completion: bool = True,
-        waiter_delay: int = 10,
-        waiter_max_attempts: int = 60,
+        waiter_delay: int = conf.getint("bedrock", "waiter_delay", fallback=10),
+        waiter_max_attempts: int = conf.getint("bedrock", "waiter_max_attempts", fallback=60),
         deferrable: bool = conf.getboolean("operators", "default_deferrable", fallback=False),
-        poll_interval: int = 10,
-        max_attempts: int = 60,
+        poll_interval: int = conf.getint("bedrock", "poll_interval", fallback=10),
+        max_attempts: int = conf.getint("bedrock", "max_attempts", fallback=60),
         aws_conn_id: str | None = "aws_default",
         region_name: str | None = None,
         **kwargs,
@@ -726,6 +731,8 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         )
         self.name = name
         self.role_arn = role_arn
+        self.embedding_model_arn = embedding_model_arn
+        self.storage_config = storage_config
         self.knowledge_base_type = knowledge_base_type.upper()
         self.create_knowledge_base_kwargs = create_knowledge_base_kwargs or {}
         self.wait_for_indexing = wait_for_indexing
@@ -738,28 +745,24 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         self.poll_interval = poll_interval
         self.max_attempts = max_attempts
 
-        if self.knowledge_base_type == "VECTOR":
-            if not embedding_model_arn or not storage_config:
+        if self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_VECTOR:
+            if not self.embedding_model_arn or not self.storage_config:
                 raise ValueError(
-                    "embedding_model_arn and storage_config are required when knowledge_base_type is 'VECTOR'."
+                    f"embedding_model_arn and storage_config are required when knowledge_base_type is '{KNOWLEDGE_BASE_TYPE_VECTOR}'."
                 )
-            self.embedding_model_arn = embedding_model_arn
-            self.storage_config = storage_config
             self.knowledge_base_config = {
-                "type": "VECTOR",
+                "type": KNOWLEDGE_BASE_TYPE_VECTOR,
                 "vectorKnowledgeBaseConfiguration": {"embeddingModelArn": self.embedding_model_arn},
             }
-        elif self.knowledge_base_type == "MANAGED":
-            self.embedding_model_arn = None
-            self.storage_config = None
+        elif self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_MANAGED:
             self.knowledge_base_config = {
-                "type": "MANAGED",
-                "managedKnowledgeBaseConfiguration": {"embeddingModeType": "MANAGED"},
+                "type": KNOWLEDGE_BASE_TYPE_MANAGED,
+                "managedKnowledgeBaseConfiguration": {"embeddingModeType": KNOWLEDGE_BASE_TYPE_MANAGED},
             }
         else:
             raise ValueError(
                 f"Unsupported knowledge_base_type: '{self.knowledge_base_type}'. "
-                f"Supported types are 'VECTOR' and 'MANAGED'."
+                f"Supported types are '{KNOWLEDGE_BASE_TYPE_VECTOR}' and '{KNOWLEDGE_BASE_TYPE_MANAGED}'."
             )
 
     def execute_complete(self, context: Context, event: dict[str, Any] | None = None) -> str:
@@ -799,7 +802,7 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
                         error.response["Error"]["Code"] == "ValidationException",
                         is_known_retryable_message,
                         self.wait_for_indexing,
-                        self.knowledge_base_type == "VECTOR",
+                        self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_VECTOR,
                         self.indexing_error_max_attempts > 0,
                     ]
                 ):
