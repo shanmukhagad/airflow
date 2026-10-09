@@ -639,6 +639,16 @@ def start_airflow(
     Enter breeze environment and starts all Airflow components in terminal multiplexer session.
     Compile assets if contents of www directory changed.
     """
+    if os.environ.get("CODESPACES") == "true":
+        console_print(
+            "[error]Running 'breeze start-airflow' inside GitHub Codespaces is not supported "
+            "due to nested container path limitations.\n\n"
+            "Codespaces already runs inside a devcontainer. Please follow the Codespaces section "
+            "in 'contributing-docs/03a_contributors_quick_start_beginners.rst' to run Airflow."
+        )
+        sys.exit(1)
+
+        
     if dev_mode and skip_assets_compilation:
         console_print("[warning]You cannot skip asset compilation in dev mode! Assets will be compiled!")
         skip_assets_compilation = True

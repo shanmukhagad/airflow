@@ -197,7 +197,9 @@ Option B – One-Click GitHub Codespaces
       prek install -f --hook-type pre-push # for running mypy checks when pushing to repo
       ./scripts/tools/setup_breeze
       uv run dev/ide_setup/setup_vscode.py
-      breeze start-airflow
+
+.. note::
+   Do not run ``breeze start-airflow`` inside GitHub Codespaces. Codespaces already runs within an isolated container environment, so attempting to spin up nested Docker Compose containers will cause path mounting and runtime errors. Use Codespaces for code editing, linting, and running standalone tests directly
 
 6. Edit a file in the editor, save, and commit via the Source Control sidebar.
    Push when prompted.
