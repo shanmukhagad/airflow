@@ -712,14 +712,12 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         knowledge_base_type: str = KNOWLEDGE_BASE_TYPE_VECTOR,
         create_knowledge_base_kwargs: dict[str, Any] | None = None,
         wait_for_indexing: bool = True,
-        indexing_error_retry_delay: int = conf.getint("bedrock", "indexing_error_retry_delay", fallback=10),
-        indexing_error_max_attempts: int = conf.getint("bedrock", "indexing_error_max_attempts", fallback=20),
+        indexing_error_retry_delay: int = conf.getint("aws", "indexing_error_retry_delay", fallback=10),
+        indexing_error_max_attempts: int = conf.getint("aws", "indexing_error_max_attempts", fallback=20),
         wait_for_completion: bool = True,
-        waiter_delay: int = conf.getint("bedrock", "waiter_delay", fallback=10),
-        waiter_max_attempts: int = conf.getint("bedrock", "waiter_max_attempts", fallback=60),
+        waiter_delay: int = conf.getint("aws", "waiter_delay", fallback=10),
+        waiter_max_attempts: int = conf.getint("aws", "waiter_max_attempts", fallback=60),
         deferrable: bool = conf.getboolean("operators", "default_deferrable", fallback=False),
-        poll_interval: int = conf.getint("bedrock", "poll_interval", fallback=10),
-        max_attempts: int = conf.getint("bedrock", "max_attempts", fallback=60),
         aws_conn_id: str | None = "aws_default",
         region_name: str | None = None,
         **kwargs,
@@ -742,8 +740,7 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         self.waiter_delay = waiter_delay
         self.waiter_max_attempts = waiter_max_attempts
         self.deferrable = deferrable
-        self.poll_interval = poll_interval
-        self.max_attempts = max_attempts
+        
 
         if self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_VECTOR:
             if not self.embedding_model_arn or not self.storage_config:
