@@ -93,6 +93,7 @@ class GKEStartPodTrigger(KubernetesPodTrigger):
         should_delete_pod: bool | None = None,
         gcp_conn_id: str = "google_cloud_default",
         impersonation_chain: str | Sequence[str] | None = None,
+        timeout: datetime | None = None,  # fix-71514
         *args,
         **kwargs,
     ):
@@ -116,6 +117,7 @@ class GKEStartPodTrigger(KubernetesPodTrigger):
         self.startup_timeout = startup_timeout
         self.gcp_conn_id = gcp_conn_id
         self.impersonation_chain = impersonation_chain
+        self.timeout = timeout  # fix-71514
 
         if should_delete_pod is not None:
             warnings.warn(
@@ -157,6 +159,7 @@ class GKEStartPodTrigger(KubernetesPodTrigger):
                 "impersonation_chain": self.impersonation_chain,
                 "logging_interval": self.logging_interval,
                 "last_log_time": self.last_log_time,
+                "timeout": self.timeout,  # fix-71514
             },
         )
 
