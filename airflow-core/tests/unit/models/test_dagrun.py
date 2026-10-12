@@ -4918,3 +4918,25 @@ class TestApplyPartitionDateWindowSubDay:
             session=session,
         )
         assert cleared == 3
+
+def test_dag_versions_does_not_short_circuit_on_bundle_version():
+    """Verify DagRun.dag_versions evaluates TI versions even when bundle_version is set (#71454)."""
+    dag_run = DagRun()
+    dag_run.bundle_version = "v1.0"
+
+    dag_version_1 = mock.MagicMock(id=1)
+    dag_version_2 = mock.MagicMock(id=2)
+
+    dag_run._prefetched_dag_version_ids = None
+
+    with mock.patch.object(
+        DagRun, "_tih_dag_versions", new_callable=mock.PropertyMock
+    ) as mock_tih, mock.patch.object(
+        DagRun, "_ti_dag_versions", new_callable=mock.PropertyMock
+    ) as mock_ti:
+        mock_tih.return_value = [dag_version_1]
+        mock_ti.return_value = [dag_version_2]
+
+        versions = dag_run.dag_versions
+
+        assert versions == [dag_version_1, dag_version_2]
