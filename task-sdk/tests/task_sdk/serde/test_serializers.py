@@ -119,6 +119,23 @@ class TestSerializers:
             assert input_obj.timestamp() == deserialized_obj.timestamp()
 
     @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param(2700, id="int"),
+            pytest.param(2700.0, id="float"),
+            pytest.param("2700.0", id="str"),
+        ],
+    )
+    def test_timedelta_accepts_numeric_payloads(self, data):
+        """JSON round-trips may narrow a whole-number interval to an int, which must still load."""
+        serialized_timedelta = {
+            CLASSNAME: "datetime.timedelta",
+            VERSION: 2,
+            DATA: data,
+        }
+        assert deserialize(serialized_timedelta) == datetime.timedelta(minutes=45)
+
+    @pytest.mark.parametrize(
         ("tz_input", "expected_tz_name"),
         [
             pytest.param("UTC", "UTC", id="utc"),
