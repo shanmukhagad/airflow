@@ -82,6 +82,16 @@ class StatsLogger(Protocol):
         """Stats timing."""
 
     @classmethod
+    def observable_gauge(
+        cls,
+        stat: str,
+        callback: Callable[[], int | float],
+        *,
+        tags: dict[str, Any] | None = None,
+   ) -> None:
+       """Observable gauge stat."""
+
+    @classmethod
     def timer(cls, *args, **kwargs) -> Timer:
         """Timer metric that can be cancelled."""
         raise NotImplementedError()
@@ -121,6 +131,10 @@ class NoStatsLogger:
     @classmethod
     def timing(cls, stat: str, dt: DeltaType, *, tags: dict[str, str] | None = None) -> None:
         """Stats timing."""
+
+    @classmethod
+    def observable_gauge( cls, stat: str, callback: Callable[[], int | float], *, tags: dict[str, str] | None = None) -> None:
+           """Observable gauge stat."""
 
     @classmethod
     def timer(cls, *args, **kwargs) -> Timer:

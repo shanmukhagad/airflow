@@ -126,6 +126,22 @@ class SafeStatsdLogger:
             return self.statsd.gauge(stat, value, rate, delta)
         return None
 
+
+    def observable_gauge(
+        self,
+        stat: str,
+        callback: Callable[[], int | float],
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        """Read the callback and send its value as a gauge, StatsD cannot poll on its own."""
+        try:
+            value = callback()
+        except Exception:
+            log.exception("Observable gauge callback for '%s' failed.", stat)
+            return
+        self.gauge(stat, value, tags=tags)
+
     @prepare_stat_with_tags
     @validate_stat
     def timing(
