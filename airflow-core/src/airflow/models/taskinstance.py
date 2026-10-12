@@ -1938,7 +1938,7 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
     @provide_session
     def handle_failure(
         self,
-        error: None | str = None,
+        error: None | str,
         test_mode: bool | None = None,
         *,
         session: Session = NEW_SESSION,
@@ -1950,27 +1950,6 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         :param test_mode: doesn't record success or failure in the DB if True
         :param session: SQLAlchemy ORM Session
         """
-        # --- NEW INFRASTRUCTURE RETRY HANDLING (#73238) ---
-        if error and "Infrastructure failure" in str(error):
-            self.log.info(
-                "TaskInstance %s experienced an infrastructure failure (%s). "
-                "Re-queuing without consuming application retry attempt.",
-                self,
-                error,
-            )
-            try:
-                if self.try_number > 0:
-                    self.try_number -= 1
-                self.state = TaskInstanceState.QUEUED
-                session.merge(self)
-                session.commit()
-            except Exception as e:
-                self.log.exception("Failed to update TaskInstance state for infrastructure failure retry: %s", e)
-                session.rollback()
-                raise
-            return
-        # --- END NEW INFRASTRUCTURE RETRY HANDLING ---
-
         if TYPE_CHECKING:
             assert self.task
             assert self.task.dag
