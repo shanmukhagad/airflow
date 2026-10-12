@@ -494,12 +494,16 @@ class BigQueryHook(GoogleBaseHook, DbApiHook):
         :param timeout: Optional. The amount of time, in seconds, to wait for the request to complete.
             Note that if `retry` is specified, the timeout applies to each individual attempt.
         """
-        _table_resource: dict[str, Any] = {}
-        if isinstance(table_resource, Table):
-            _table_resource = Table.from_api_repr(table_resource)  # type: ignore
+        if isinstance(table_resource, TableReference):
+            # TableReference.to_api_repr() is flat, so wrap it
+            resource: dict[str, Any] = {"tableReference": table_resource.to_api_repr()}
+        elif isinstance(table_resource, (Table, TableListItem)):
+            resource = table_resource.to_api_repr()
+        else:
+            resource = dict(table_resource)
         if schema_fields:
-            _table_resource["schema"] = {"fields": schema_fields}
-        table_resource_final = {**table_resource, **_table_resource}  # type: ignore
+            resource["schema"] = {"fields": schema_fields}
+        table_resource_final = resource
         table_resource = self._resolve_table_reference(
             table_resource=table_resource_final,
             project_id=project_id,
