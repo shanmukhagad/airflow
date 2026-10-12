@@ -1467,6 +1467,36 @@ class TestExternalTaskSensorV3:
         assert op.external_dates_filter == DEFAULT_DATE.isoformat()
 
     @pytest.mark.execution_timeout(10)
+    def test_check_existence_raises_when_task_not_found(self,dag_maker):
+        with dag_maker ("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id="test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="non_existing_task",
+                check_existence=True,
+            )
+
+        self.context["ti"].get_dr_count = mock.MagicMock(return_value=1)
+
+        with pytest.raises(ExternalTaskNotFoundError): 
+            op.execute(context=self.context)
+
+    @pytest.mark.execution_timeout(10)
+    def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,dag_maker):
+        with dag_maker ("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id = "test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="non_existing_task",
+                check_existence=True,
+            )
+
+        self.context["ti"].get_dr_count = mock.MagicMock(return_value=0)
+
+        assert op.poke(context=self.context) is False
+
+
+    @pytest.mark.execution_timeout(10)
     def test_external_task_sensor_task_group_failed_states(self, dag_maker):
         with dag_maker("test_dag_child"):
             op = ExternalTaskSensor(

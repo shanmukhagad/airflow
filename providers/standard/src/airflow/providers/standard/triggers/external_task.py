@@ -28,6 +28,9 @@ from airflow.models import DagRun
 from airflow.providers.standard.utils.sensor_helper import _get_count
 from airflow.providers.standard.version_compat import AIRFLOW_V_3_0_PLUS
 from airflow.triggers.base import BaseTrigger, TriggerEvent
+from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
+from airflow.providers.standard.exceptions import ExternalTaskNotFoundError
+from airflow.providers.standard.exceptions import ExternalTaskGroupNotFoundError
 
 if typing.TYPE_CHECKING:
     from datetime import datetime
@@ -66,6 +69,7 @@ class WorkflowTrigger(BaseTrigger):
         allowed_states: Collection[str] | None = None,
         poke_interval: float = 2.0,
         soft_fail: bool = False,
+        check_existence: bool = False,
         **kwargs,
     ):
         self.external_dag_id = external_dag_id
@@ -79,6 +83,8 @@ class WorkflowTrigger(BaseTrigger):
         self.soft_fail = soft_fail
         self.execution_dates = execution_dates
         self.logical_dates = logical_dates
+        self.check_existence = check_existence
+
         super().__init__(**kwargs)
 
     def serialize(self) -> tuple[str, dict[str, Any]]:
@@ -92,6 +98,7 @@ class WorkflowTrigger(BaseTrigger):
             "allowed_states": self.allowed_states,
             "poke_interval": self.poke_interval,
             "soft_fail": self.soft_fail,
+            "check_existence": self.check_existence,
         }
         if AIRFLOW_V_3_0_PLUS:
             data["run_ids"] = self.run_ids
@@ -127,6 +134,23 @@ class WorkflowTrigger(BaseTrigger):
             if allowed_count == len(run_id_or_dates):
                 yield TriggerEvent({"status": "success"})
                 return
+            if AIRFLOW_V_3_0_PLUS and self.check_existence and allowed_count == 0:
+                if self.external_task_ids or self.external_task_group_id:
+                    dr_count = await sync_to_async(RuntimeTaskInstance.get_dr_count)(
+                        dag_id=self.external_dag_id,
+                        logical_dates=self.logical_dates,
+                        run_ids=self.run_ids,
+                        states=["queued", "running", "success", "failed"],
+                    )
+                    if dr_count > 0:
+                        if self.external_task_ids:
+                            raise ExternalTaskNotFoundError(
+                                f"Task(s) {self.external_task_ids} not found in DAG {self.external_dag_id}"
+                            )
+                        else:
+                            raise ExternalTaskGroupNotFoundError(
+                                f"Task group '{self.external_task_group_id}' not found in DAG {self.external_dag_id}"
+                            )            
             self.log.info("Sleeping for %s seconds", self.poke_interval)
             await asyncio.sleep(self.poke_interval)
 

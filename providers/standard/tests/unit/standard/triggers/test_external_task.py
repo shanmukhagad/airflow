@@ -28,6 +28,7 @@ from airflow.providers.standard.triggers.external_task import DagStateTrigger, W
 from airflow.triggers.base import TriggerEvent
 from airflow.utils import timezone
 from airflow.utils.state import DagRunState
+from airflow.providers.standard.exceptions import ExternalTaskNotFoundError
 
 from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
 
@@ -223,6 +224,55 @@ class TestWorkflowTrigger:
         mock_sleep.assert_awaited()
         assert mock_sleep.await_count == 1
 
+    @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_dr_count")
+    @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_ti_count")
+    @pytest.mark.asyncio
+    async def test_check_existence_raises_when_task_not_found(self, mock_get_ti_count, mock_get_dr_count):
+        mock_get_ti_count.return_value = 0
+        mock_get_dr_count.return_value = 1
+
+        trigger = WorkflowTrigger(
+            external_dag_id=self.DAG_ID,
+            logical_dates=[self.LOGICAL_DATE],
+            run_ids=[self.RUN_ID],
+            external_task_ids=[self.TASK_ID],
+            allowed_states=self.STATES,
+            poke_interval=0.2,
+            check_existence=True,
+        )
+
+        gen = trigger.run()
+        with pytest.raises(ExternalTaskNotFoundError):
+            await gen.__anext__()
+
+    @pytest.mark.execution_timeout (10)
+    @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_dr_count")
+    @mock.patch("asyncio.sleep", new_callable=mock.AsyncMock)
+    @pytest.mark.asyncio
+    #@mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_ti_count")
+    
+    async def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,mock_sleep, mock_get_dr_count):
+        #mock_get_ti_count.side_effect = [0.1]
+        mock_get_dr_count.return_value = 0
+        trigger = WorkflowTrigger(
+            external_dag_id = self.DAG_ID,
+            logical_dates = [self.LOGICAL_DATE],
+            run_ids = [self.RUN_ID],
+            external_task_ids = [self.TASK_ID],
+            allowed_states = self.STATES,
+            poke_interval= 0.2,
+            check_existence=True
+        )
+
+        trigger._get_count_af_3 = mock.AsyncMock(side_effect=[0,1])
+
+        gen = trigger.run()
+        trigger_task = asyncio.create_task(gen.__anext__())
+        await trigger_task
+        result = trigger_task.result()
+        assert result.payload == {"status":"success"}
+        mock_sleep.assert_awaited_once()
+
     @pytest.mark.parametrize(
         (
             "task_ids",
@@ -393,6 +443,7 @@ class TestWorkflowTrigger:
             external_task_ids=[self.TASK_ID],
             allowed_states=self.STATES,
             poke_interval=5,
+            check_existence=False,
         )
         classpath, kwargs = trigger.serialize()
         assert classpath == "airflow.providers.standard.triggers.external_task.WorkflowTrigger"
@@ -407,6 +458,7 @@ class TestWorkflowTrigger:
             "allowed_states": self.STATES,
             "poke_interval": 5,
             "soft_fail": False,
+            "check_existence": False
         }
 
 
