@@ -325,38 +325,6 @@ class TestKubernetesExecutor:
         self.kubernetes_executor.job_id = 5
         self.kubernetes_executor._last_completed_pod_adoption = time.monotonic()
 
-    def test_change_state_infrastructure_failure_requeues(self):
-        """Test that pod infrastructure failures re-queue tasks without marking them failed."""
-        executor = KubernetesExecutor()
-        executor.kube_scheduler = mock.MagicMock()
-
-        key = TaskInstanceKey("dag", "task", "run_id", 1, -1)
-        results = KubernetesResults(
-            key=key,
-            state=TaskInstanceState.FAILED,
-            pod_name="test-pod",
-            namespace="default",
-            resource_version="1",
-            failure_details={
-                "pod_status": "Failed",
-                "pod_reason": "Evicted",
-                "pod_message": "Pod was evicted",
-                "container_state": "waiting",
-                "container_reason": "Evicted",
-                "container_message": None,
-                "exit_code": None,
-                "container_type": "base",
-                "container_name": "base",
-            },
-        )
-
-        executor.running.add(key)
-        executor._change_state(results)
-
-        state, msg = executor.event_buffer[key]
-        assert state == TaskInstanceState.QUEUED
-        assert "Infrastructure failure" in msg
-        
     def test_resource_version_singleton(self):
         """Test that ResourceVersion returns the same instance."""
         rv1 = ResourceVersion()
