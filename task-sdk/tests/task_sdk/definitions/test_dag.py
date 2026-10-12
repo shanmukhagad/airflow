@@ -531,6 +531,11 @@ def test__tags_length(tags: list[str], should_pass: bool):
         with pytest.raises(ValueError, match="tag cannot be longer than 100 characters"):
             DAG("test-dag", schedule=None, tags=tags)
 
+def test_tag_identifies_offending_tag():
+    long_tag = "this-is-a-very-long-" + "x" * 90
+    with pytest.raises (ValueError, match="this-is-a-very-long-"):
+            DAG("test-dag", schedule=None, tags=["normal_tag",long_tag])
+
 
 @pytest.mark.parametrize(
     ("input_tags", "expected_result"),
