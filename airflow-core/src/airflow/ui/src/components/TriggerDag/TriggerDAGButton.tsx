@@ -16,11 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, Button, useDisclosure } from "@chakra-ui/react";
+import { Box, Button, ButtonGroup, useDisclosure } from "@chakra-ui/react";
 import type { DagRunType } from "openapi-gen/requests/types.gen";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FiPlay } from "react-icons/fi";
+import { FiPlay, FiChevronDown } from "react-icons/fi";
 import { useParams } from "react-router-dom";
 
 import { useDagRunServiceGetDagRun } from "openapi/queries";
@@ -91,28 +91,39 @@ export const TriggerDAGButton = ({
   };
 
   // If there's a selected DAG Run with config, show menu with options
-  if (selectedDagRun?.conf !== undefined) {
+  if (runId == undefined || selectedDagRun !== undefined) {
     return (
       <Box>
         <Menu.Root>
           <Tooltip content={translate("triggerDag.manualRunDenied")} disabled={!isManualRunDenied}>
-            <Menu.Trigger asChild>
+            <ButtonGroup attached>
               <Button
                 aria-label={translate("triggerDag.title")}
                 data-testid="trigger-dag-button"
                 disabled={isManualRunDenied}
                 variant={variant}
+                onClick={handleNormalTrigger}
               >
                 <FiPlay />
                 {translate("triggerDag.button")}
               </Button>
-            </Menu.Trigger>
+
+              <Menu.Trigger asChild>
+                <IconButton
+                  aria-label="More trigger options"
+                  disabled={isManualRunDenied}
+                  variant={variant}
+                >
+                  <FiChevronDown />
+                </IconButton>
+              </Menu.Trigger>
+            </ButtonGroup>     
           </Tooltip>
           <Menu.Content>
             <Menu.Item onClick={handleNormalTrigger} value="trigger">
               {translate("triggerDag.button")}
             </Menu.Item>
-            <Menu.Item onClick={handleTriggerWithConfig} value="triggerWithConfig">
+             <Menu.Item onClick={handleTriggerWithConfig} value="triggerWithConfig">
               {translate("triggerDag.triggerAgainWithConfig")}
             </Menu.Item>
           </Menu.Content>
