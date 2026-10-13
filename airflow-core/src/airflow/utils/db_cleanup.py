@@ -153,6 +153,9 @@ config_list: list[_TableConfig] = [
         recency_column_name="last_parsed_time",
         dependent_tables=["dag_version", "deadline"],
         dag_id_column_name="dag_id",
+        # Deleting a Dag cascades to versions that surviving task instances may still pin.
+        skip_if_referenced=[("task_instance", "dag_id")],
+        referenced_pk_column="dag_id",
     ),
     _TableConfig(
         table_name="dag_run",
@@ -297,7 +300,14 @@ def _dump_table_to_file(*, target_table: str, file_path: str, export_format: str
 
 
 def _do_delete(
-    *, query: Select, orm_model: Base, skip_archive: bool, session: Session, batch_size: int | None
+    *,
+    query: Select,
+    orm_model: Base,
+    skip_archive: bool,
+    session: Session,
+    batch_size: int | None,
+    skip_if_referenced: list[tuple[str, str]] | None = None,
+    referenced_pk_column: str = "id",
 ) -> None:
     import itertools
     import re
@@ -349,17 +359,32 @@ def _do_delete(
             source_table = metadata.tables[orm_model.name]
             target_table = metadata.tables[target_table_name]
             logger.debug("rows moved; purging from %s", source_table.name)
+            delete_conditions = []
             if dialect_name == "sqlite":
                 pk_cols = source_table.primary_key.columns
-                delete = source_table.delete().where(
+                delete_conditions.append(
                     tuple_(*pk_cols).in_(
                         select(*[target_table.c[x.name] for x in source_table.primary_key.columns])
                     )
                 )
             else:
-                delete = source_table.delete().where(
+                delete_conditions.append(
                     and_(*[col == target_table.c[col.name] for col in source_table.primary_key.columns])
                 )
+
+            if skip_if_referenced:
+                source_pk_col = source_table.c[referenced_pk_column]
+                for referencing_table, fk_column in skip_if_referenced:
+                    referencing = table(referencing_table, column(fk_column))
+                    delete_conditions.append(
+                        ~select(literal(1))
+                        .select_from(referencing)
+                        .where(referencing.c[fk_column] == source_pk_col)
+                        .correlate(source_table)
+                        .exists()
+                    )
+
+            delete = source_table.delete().where(and_(*delete_conditions))
             logger.debug("delete statement:\n%s", delete.compile())
             session.execute(delete)
             session.commit()
@@ -530,6 +555,8 @@ def _cleanup_table(
             skip_archive=skip_archive,
             session=session,
             batch_size=batch_size,
+            skip_if_referenced=skip_if_referenced,
+            referenced_pk_column=referenced_pk_column,
         )
 
     session.commit()
