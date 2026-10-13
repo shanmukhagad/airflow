@@ -23,6 +23,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from botocore.exceptions import ClientError
 
+from airflow.providers.amazon.aws.auth_manager.constants import (
+    KNOWLEDGE_BASE_TYPE_MANAGED,
+    KNOWLEDGE_BASE_TYPE_VECTOR,
+)
+
 from airflow.providers.amazon.aws.hooks.bedrock import (
     BedrockAgentCoreControlHook,
     BedrockAgentCoreHook,
@@ -45,6 +50,11 @@ from airflow.providers.amazon.aws.utils import validate_execute_complete_event
 from airflow.providers.amazon.aws.utils.mixins import aws_template_fields
 from airflow.providers.common.compat.sdk import AirflowException, conf, timezone
 from airflow.utils.helpers import prune_dict
+
+from airflow.providers.amazon.aws.auth_manager.constants import (
+    KNOWLEDGE_BASE_TYPE_MANAGED,
+    KNOWLEDGE_BASE_TYPE_VECTOR,
+)
 
 if TYPE_CHECKING:
     from airflow.sdk import Context
@@ -662,8 +672,6 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
     """
     Create a knowledge base that contains data sources used by Amazon Bedrock LLMs and Agents.
 
-    To create a knowledge base, you must first set up your data sources and configure a supported vector store.
-
     .. seealso::
         For more information on how to use this operator, take a look at the guide:
         :ref:`howto/operator:BedrockCreateKnowledgeBaseOperator`
@@ -672,29 +680,13 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
     :param embedding_model_arn: ARN of the model used to create vector embeddings for the knowledge base. (templated)
     :param role_arn: The ARN of the IAM role with permissions to create the knowledge base. (templated)
     :param storage_config: Configuration details of the vector database used for the knowledge base. (templated)
+    :param knowledge_base_type: Type of Knowledge Base. Defaults to 'VECTOR'. Options: 'VECTOR', 'MANAGED'. (templated)
     :param wait_for_indexing: Vector indexing can take some time and there is no apparent way to check the state
-        before trying to create the Knowledge Base.  If this is True, and creation fails due to the index not
-        being available, the operator will wait and retry.  (default: True) (templated)
-    :param indexing_error_retry_delay: Seconds between retries if an index error is encountered. (default 5) (templated)
-    :param indexing_error_max_attempts: Maximum number of times to retry when encountering an index error. (default 20) (templated)
+        before trying to create the Knowledge Base. If this is True, and creation fails due to the index not
+        being available, the operator will wait and retry. (default: True) (templated)
+    :param indexing_error_retry_delay: Seconds between retries if an index error is encountered. (templated)
+    :param indexing_error_max_attempts: Maximum number of times to retry when encountering an index error. (templated)
     :param create_knowledge_base_kwargs: Any additional optional parameters to pass to the API call. (templated)
-
-    :param wait_for_completion: Whether to wait for cluster to stop. (default: True)
-    :param waiter_delay: Time in seconds to wait between status checks. (default: 60)
-    :param waiter_max_attempts: Maximum number of attempts to check for job completion. (default: 20)
-    :param deferrable: If True, the operator will wait asynchronously for the cluster to stop.
-        This implies waiting for completion. This mode requires aiobotocore module to be installed.
-        (default: False)
-    :param aws_conn_id: The Airflow connection used for AWS credentials.
-        If this is ``None`` or empty then the default boto3 behaviour is used. If
-        running Airflow in a distributed manner and aws_conn_id is None or
-        empty, then default boto3 configuration would be used (and must be
-        maintained on each worker node).
-    :param region_name: AWS region_name. If not specified then the default boto3 behaviour is used.
-    :param verify: Whether or not to verify SSL certificates. See:
-        https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html
-    :param botocore_config: Configuration dictionary (key-values) for botocore client. See:
-        https://botocore.amazonaws.com/v1/documentation/api/latest/reference/config.html
     """
 
     aws_hook_class = BedrockAgentHook
@@ -703,6 +695,7 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
         "embedding_model_arn",
         "role_arn",
         "storage_config",
+        "knowledge_base_type",
         "wait_for_indexing",
         "indexing_error_retry_delay",
         "indexing_error_max_attempts",
@@ -711,38 +704,63 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
 
     def __init__(
         self,
+        *,
         name: str,
-        embedding_model_arn: str,
         role_arn: str,
-        storage_config: dict[str, Any],
+        embedding_model_arn: str | None = None,
+        storage_config: dict[str, Any] | None = None,
+        knowledge_base_type: str = KNOWLEDGE_BASE_TYPE_VECTOR,
         create_knowledge_base_kwargs: dict[str, Any] | None = None,
         wait_for_indexing: bool = True,
-        indexing_error_retry_delay: int = 5,  # seconds
-        indexing_error_max_attempts: int = 20,
+        indexing_error_retry_delay: int = conf.getint("aws", "indexing_error_retry_delay", fallback=10),
+        indexing_error_max_attempts: int = conf.getint("aws", "indexing_error_max_attempts", fallback=20),
         wait_for_completion: bool = True,
-        waiter_delay: int = 60,
-        waiter_max_attempts: int = 20,
+        waiter_delay: int = conf.getint("aws", "waiter_delay", fallback=10),
+        waiter_max_attempts: int = conf.getint("aws", "waiter_max_attempts", fallback=60),
         deferrable: bool = conf.getboolean("operators", "default_deferrable", fallback=False),
+        aws_conn_id: str | None = "aws_default",
+        region_name: str | None = None,
         **kwargs,
-    ):
-        super().__init__(**kwargs)
+    ) -> None:
+        super().__init__(
+            aws_conn_id=aws_conn_id,
+            region_name=region_name,
+            **kwargs,
+        )
         self.name = name
         self.role_arn = role_arn
-        self.storage_config = storage_config
-        self.create_knowledge_base_kwargs = create_knowledge_base_kwargs or {}
         self.embedding_model_arn = embedding_model_arn
-        self.knowledge_base_config = {
-            "type": "VECTOR",
-            "vectorKnowledgeBaseConfiguration": {"embeddingModelArn": self.embedding_model_arn},
-        }
+        self.storage_config = storage_config
+        self.knowledge_base_type = knowledge_base_type.upper()
+        self.create_knowledge_base_kwargs = create_knowledge_base_kwargs or {}
         self.wait_for_indexing = wait_for_indexing
         self.indexing_error_retry_delay = indexing_error_retry_delay
         self.indexing_error_max_attempts = indexing_error_max_attempts
-
         self.wait_for_completion = wait_for_completion
         self.waiter_delay = waiter_delay
         self.waiter_max_attempts = waiter_max_attempts
         self.deferrable = deferrable
+        
+
+        if self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_VECTOR:
+            if not self.embedding_model_arn or not self.storage_config:
+                raise ValueError(
+                    f"embedding_model_arn and storage_config are required when knowledge_base_type is '{KNOWLEDGE_BASE_TYPE_VECTOR}'."
+                )
+            self.knowledge_base_config = {
+                "type": KNOWLEDGE_BASE_TYPE_VECTOR,
+                "vectorKnowledgeBaseConfiguration": {"embeddingModelArn": self.embedding_model_arn},
+            }
+        elif self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_MANAGED:
+            self.knowledge_base_config = {
+                "type": KNOWLEDGE_BASE_TYPE_MANAGED,
+                "managedKnowledgeBaseConfiguration": {"embeddingModeType": KNOWLEDGE_BASE_TYPE_MANAGED},
+            }
+        else:
+            raise ValueError(
+                f"Unsupported knowledge_base_type: '{self.knowledge_base_type}'. "
+                f"Supported types are '{KNOWLEDGE_BASE_TYPE_VECTOR}' and '{KNOWLEDGE_BASE_TYPE_MANAGED}'."
+            )
 
     def execute_complete(self, context: Context, event: dict[str, Any] | None = None) -> str:
         validated_event = validate_execute_complete_event(event)
@@ -755,24 +773,22 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
 
     def execute(self, context: Context) -> str:
         def _create_kb():
-            # This API call will return the following if the index has not completed, but there is no apparent
-            # way to check the state of the index beforehand, so retry on index failure if set to do so.
-            #       botocore.errorfactory.ValidationException: An error occurred (ValidationException)
-            #       when calling the CreateKnowledgeBase operation: The knowledge base storage configuration
-            #       provided is invalid... no such index [bedrock-sample-rag-index-abc108]
             try:
-                return self.hook.conn.create_knowledge_base(
-                    name=self.name,
-                    roleArn=self.role_arn,
-                    knowledgeBaseConfiguration=self.knowledge_base_config,
-                    storageConfiguration=self.storage_config,
-                    **self.create_knowledge_base_kwargs,
-                )["knowledgeBase"]["knowledgeBaseId"]
+                kwargs: dict[str, Any] = {
+                    "name": self.name,
+                    "roleArn": self.role_arn,
+                    "knowledgeBaseConfiguration": self.knowledge_base_config,
+                }
+                if self.storage_config:
+                    kwargs["storageConfiguration"] = self.storage_config
+
+                kwargs.update(self.create_knowledge_base_kwargs)
+
+                return self.hook.conn.create_knowledge_base(**kwargs)["knowledgeBase"]["knowledgeBaseId"]
             except ClientError as error:
                 error_message = error.response["Error"]["Message"].lower()
                 is_known_retryable_message = (
                     "no such index" in error_message
-                    # It may also be that permissions haven't even propagated yet to check for the index
                     or "server returned 401" in error_message
                     or "user does not have permissions" in error_message
                     or "status code: 403" in error_message
@@ -783,6 +799,7 @@ class BedrockCreateKnowledgeBaseOperator(AwsBaseOperator[BedrockAgentHook]):
                         error.response["Error"]["Code"] == "ValidationException",
                         is_known_retryable_message,
                         self.wait_for_indexing,
+                        self.knowledge_base_type == KNOWLEDGE_BASE_TYPE_VECTOR,
                         self.indexing_error_max_attempts > 0,
                     ]
                 ):
