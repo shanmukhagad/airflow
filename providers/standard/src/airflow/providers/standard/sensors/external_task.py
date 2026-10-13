@@ -356,25 +356,6 @@ class ExternalTaskSensor(BaseSensorOperator):
 
         count = _get_count(self.allowed_states)
         count_allowed = self._calculate_count(count, dttm_filter)
-        #return count_allowed == len(dttm_filter)
-
-        if count_allowed == 0 and self.check_existence:
-            if self.external_task_ids:
-                dr_count = ti.get_dr_count(
-                    dag_id=self.external_dag_id,
-                    logical_dates=list(dttm_filter),
-                    states=list(State.dag_states),
-                )
-                if dr_count > 0:
-                    raise ExternalTaskNotFoundError (f"Task(s) {self.external_task_ids} not found in DAG {self.external_dag_id}")
-            elif self.external_task_group_id:
-                dr_count = ti.get_dr_count(
-                    dag_id = self.external_dag_id,
-                    logical_dates = list(dttm_filter),
-                    states = list(State.dag_states),
-                )
-                if dr_count > 0:
-                    raise ExternalTaskNotFoundError (f"Task group '{self.external_task_group_id}' not found in DAG {self.external_dag_id}")
         return count_allowed == len(dttm_filter)
 
     def _calculate_count(self, count: int, dttm_filter: Sequence[datetime.datetime]) -> float | int:
@@ -473,7 +454,6 @@ class ExternalTaskSensor(BaseSensorOperator):
                         skipped_states=self.skipped_states,
                         poke_interval=self.poll_interval,
                         soft_fail=self.soft_fail,
-                        check_existence=self.check_existence,
                         logical_dates=list(dttm_filter),
                         run_ids=None,
                         execution_dates=None,

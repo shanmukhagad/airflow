@@ -627,9 +627,7 @@ class DAG:
         for tag in tags:
             if len(tag) > TAG_MAX_LEN:
                 raise ValueError (f"The tag '{tag[:20]}...' is {len(tag)} characters, tag cannot be longer than {TAG_MAX_LEN} characters")
-        #if tags and any(len(tag) > TAG_MAX_LEN for tag in tags):
-        #    raise ValueError(f"tag cannot be longer than {TAG_MAX_LEN} characters")
-
+            
     @allowed_run_types.validator
     def _validate_allowed_run_types(self, _, allowed_run_types):
         if not allowed_run_types:
