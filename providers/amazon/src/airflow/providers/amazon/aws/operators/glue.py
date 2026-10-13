@@ -325,7 +325,7 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
                             self._job_run_id = existing_job_run_id
                             ti.xcom_push(key="glue_job_run_id", value=self._job_run_id)
                 except ClientError as error:
-                    self.log.warning(
+                    self.log.error(
                         "Failed to find previous Glue job run by task UUID: %s",
                         error,
                         exc_info=True,

@@ -24,6 +24,7 @@ import boto3
 import pendulum
 import pytest
 from boto3 import client
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from airflow.providers.amazon.aws.hooks.glue import GlueDataQualityHook, GlueJobHook
@@ -591,6 +592,92 @@ class TestGlueJobOperator:
         ]
         assert len(xcom_calls) == 1, "Should push existing glue_job_run_id when found by task UUID"
         assert xcom_calls[0][1]["value"] == "existing_run_123"
+
+    @mock.patch.object(GlueJobHook, "initialize_job")
+    def test_resume_glue_job_on_retry_handles_client_error(self, mock_initialize_job, caplog):
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        mock_ti = mock.MagicMock()
+        mock_ti.dag_id = DAG_ID
+        mock_ti.task_id = TASK_ID
+        mock_ti.run_id = "manual__2024-01-01T00:00:00+00:00"
+        mock_ti.map_index = -1
+        mock_ti.xcom_pull.return_value = None
+
+        context = {
+            "ti": mock_ti,
+            "dag_run": mock.MagicMock(
+                start_date=pendulum.datetime(2024, 1, 1, tz="UTC")
+            ),
+        }
+
+        error = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
+            "GetJobRuns",
+        )
+
+        mock_glue_client = mock.MagicMock()
+        mock_glue_client.get_job_runs.side_effect = error
+        glue.hook.conn = mock_glue_client
+
+        mock_initialize_job.return_value = {"JobRunId": "new_run_123"}
+
+        glue.execute(context)
+
+        assert any(
+            record.levelname == "ERROR"
+            and "AccessDeniedException" in record.message
+            and "Access denied" in record.message
+            for record in caplog.records
+        )
+        mock_initialize_job.assert_called_once()
+
+    def test_resume_glue_job_on_retry_propagates_unexpected_exception(self):
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        mock_ti = mock.MagicMock()
+        mock_ti.dag_id = DAG_ID
+        mock_ti.task_id = TASK_ID
+        mock_ti.run_id = "manual__2024-01-01T00:00:00+00:00"
+        mock_ti.map_index = -1
+        mock_ti.xcom_pull.return_value = None
+
+        context = {
+            "ti": mock_ti,
+            "dag_run": mock.MagicMock(
+                start_date=pendulum.datetime(2024, 1, 1, tz="UTC")
+            ),
+        }
+
+        glue._prepare_script_args_with_task_uuid = mock.Mock(
+            return_value=({}, "task-uuid")
+        )
+        glue._find_job_run_id_by_task_uuid = mock.Mock(
+            side_effect=RuntimeError("unexpected failure")
+        )
+
+        with pytest.raises(RuntimeError, match="unexpected failure"):
+            glue.execute(context)
 
     def test_find_job_run_by_task_uuid_scans_all_pages(self):
         """Test that the task UUID search continues through paginated results."""
