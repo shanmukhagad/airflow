@@ -26,10 +26,10 @@ from airflow._shared.timezones.timezone import coerce_datetime, parse_timezone, 
 from airflow.timetables._cron import CronMixin
 from airflow.timetables._delta import DeltaMixin
 from airflow.timetables.base import DagRunInfo, DataInterval, Timetable
+from airflow.utils.types import DagRunType
 
 if TYPE_CHECKING:
     from airflow.timetables.base import TimeRestriction
-    from airflow.utils.types import DagRunType
 
 Delta = datetime.timedelta | relativedelta
 
@@ -163,7 +163,7 @@ class CronDataIntervalTimetable(CronMixin, _DataIntervalTimetable):
         data_interval: DataInterval | None,
         **extra: Any,
     ) -> str:
-        if data_interval is not None:
+        if run_type == DagRunType.SCHEDULED and data_interval is not None:
             return run_type.generate_run_id(suffix=data_interval.start.isoformat())
 
         return super().generate_run_id(

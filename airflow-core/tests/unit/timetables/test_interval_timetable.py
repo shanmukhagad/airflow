@@ -383,6 +383,23 @@ def test_generate_run_id_without_data_interval() -> None:
     assert run_id == "manual__2026-09-30T00:00:00+00:00"
 
 
+def test_manual_run_id_uses_existing_logic_with_data_interval() -> None:
+    timetable = CronDataIntervalTimetable("@daily", utc)
+    data_interval = DataInterval(
+        start=pendulum.DateTime(2026, 9, 29, tzinfo=utc),
+        end=pendulum.DateTime(2026, 9, 30, tzinfo=utc),
+    )
+    run_after = pendulum.DateTime(2026, 10, 1, tzinfo=utc)
+
+    run_id = timetable.generate_run_id(
+        run_type=DagRunType.MANUAL,
+        run_after=run_after,
+        data_interval=data_interval,
+    )
+
+    assert run_id == "manual__2026-10-01T00:00:00+00:00"
+
+
 @pytest.mark.parametrize(
     "timetable",
     [
