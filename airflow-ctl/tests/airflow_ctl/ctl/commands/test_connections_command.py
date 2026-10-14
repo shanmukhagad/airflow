@@ -260,3 +260,69 @@ class TestCliConnectionCommands:
         bulk_body = mock_client.connections.bulk.call_args[0][0]
         action = bulk_body.actions[0]
         assert action.action_on_existence == expected_enum
+
+    def test_import_missing_conn_type(self, tmp_path):
+        """Missing conn_type raises SystemExit with a clear message."""
+        connections_data = {
+            "my_conn": {
+                "host": "localhost",
+                "login": "admin",
+            }
+        }
+
+        conn_file = tmp_path / "connections.json"
+        conn_file.write_text(json.dumps(connections_data))
+
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
+        api_client = mock.MagicMock(spec=Client)
+
+        with pytest.raises(SystemExit) as exc_info:
+            connection_command.import_(args, api_client=api_client)
+
+        assert "conn_type" in str(exc_info.value)
+        assert "my_conn" in str(exc_info.value)
+        api_client.connections.bulk.assert_not_called()
+
+    def test_import_missing_connection_id(self, tmp_path):
+        """Missing connection_id raises SystemExit with a clear message."""
+        connections_data = {
+            "": {
+                "conn_type": "http",
+                "host": "localhost",
+            }
+        }
+
+        conn_file = tmp_path / "connections.json"
+        conn_file.write_text(json.dumps(connections_data))
+
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
+        api_client = mock.MagicMock(spec=Client)
+
+        with pytest.raises(SystemExit, match="connection_id") as exc_info:
+            connection_command.import_(args, api_client=api_client)
+
+        assert "connection_id" in str(exc_info.value)
+        api_client.connections.bulk.assert_not_called()
+
+    def test_import_empty_connection_id(self, tmp_path):
+        """An empty JSON key raises a clear connection_id error."""
+        connections_data = {
+            "": {
+                "conn_type": "http",
+                "host": "localhost",
+            }
+        }
+
+        conn_file = tmp_path / "connections.json"
+        conn_file.write_text(json.dumps(connections_data))
+
+        args = self.parser.parse_args(["connections", "import", str(conn_file)])
+        api_client = mock.MagicMock(spec=Client)
+
+        with pytest.raises(
+            SystemExit,
+            match="connection_id",
+        ):
+            connection_command.import_(args, api_client=api_client)
+
+        api_client.connections.bulk.assert_not_called()
