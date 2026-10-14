@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from airflow.listeners import hookimpl
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from airflow.models.dagrun import DagRun
     from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
     from airflow.utils.state import TaskInstanceState
+
+log = logging.getLogger(__name__)
 
 
 # [START howto_listen_ti_running_task]
@@ -148,16 +151,16 @@ def on_task_instance_up_for_retry(
     ``on_task_instance_failed`` is also called in this case. Use this hook to tell a retry
     apart from a terminal failure, for example to avoid paging someone on every retry.
     """
-    print("Task instance failed and will be retried")
+    log.warning("Task instance failed and will be retried")
 
     if isinstance(task_instance, TaskInstance):
-        print(f"Task operator:{task_instance.operator}")
+        log.info("Task operator: %s", task_instance.operator)
     else:
         context = task_instance.get_template_context()
-        print(f"Task:{context['task']}")
+        log.info("Task: %s", context["task"])
 
     if error:
-        print(f"Failure caused by {error}")
+        log.warning("Failure caused by %s", error)
 
 
 # [END howto_listen_ti_up_for_retry_task]
