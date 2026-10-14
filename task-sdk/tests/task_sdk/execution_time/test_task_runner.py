@@ -4736,14 +4736,17 @@ class TestTaskRunnerCallsListeners:
         class RetryListener:
             def __init__(self):
                 self.events = []
+                self.errors = {}
 
             @hookimpl
             def on_task_instance_failed(self, previous_state, task_instance, error):
                 self.events.append("failed")
+                self.errors["failed"] = error
 
             @hookimpl
             def on_task_instance_up_for_retry(self, previous_state, task_instance, error):
                 self.events.append("up_for_retry")
+                self.errors["up_for_retry"] = error
 
         listener = RetryListener()
         listener_manager(listener)
@@ -4766,22 +4769,28 @@ class TestTaskRunnerCallsListeners:
         )
         log = mock.MagicMock()
         context = runtime_ti.get_template_context()
-        finalize(runtime_ti, state, context, log, ValueError("boom"))
-        return listener
+        error = ValueError("boom")
+        finalize(runtime_ti, state, context, log, error)
+        return listener, error
 
     def test_task_runner_calls_up_for_retry_listener_on_retry(
         self, mocked_parse, mock_supervisor_comms, listener_manager
     ):
-        listener = self._finalize_with_retry_listener(listener_manager, TaskInstanceState.UP_FOR_RETRY)
+        listener, error = self._finalize_with_retry_listener(
+            listener_manager, TaskInstanceState.UP_FOR_RETRY
+        )
 
         assert listener.events == ["failed", "up_for_retry"]
+        assert listener.errors["up_for_retry"] is error
+        assert str(listener.errors["up_for_retry"]) == "boom"
 
     def test_task_runner_does_not_call_up_for_retry_listener_on_terminal_failure(
         self, mocked_parse, mock_supervisor_comms, listener_manager
     ):
-        listener = self._finalize_with_retry_listener(listener_manager, TaskInstanceState.FAILED)
+        listener, error = self._finalize_with_retry_listener(listener_manager, TaskInstanceState.FAILED)
 
         assert listener.events == ["failed"]
+        assert listener.errors["failed"] is error
 
     def test_task_runner_calls_listeners_skipped(self, mocked_parse, mock_supervisor_comms, listener_manager):
         listener = self.CustomListener()
