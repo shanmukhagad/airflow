@@ -1751,6 +1751,27 @@ class TestStringifiedDAGs:
         for t in tasks:
             validator.validate(t["__var"])
 
+    @pytest.mark.parametrize("missing_key", ["_is_mapped", "partial_kwargs"])
+    def test_schema_dependencies_reject_unpaired_mapped_keys(self, missing_key):
+        import copy
+
+        import jsonschema
+
+        from airflow.providers.standard.operators.bash import BashOperator
+
+        with DAG("test_schema_mapped_negative", schedule=None, start_date=datetime(2024, 1, 1)) as dag:
+            BashOperator.partial(task_id="classic").expand(bash_command=["a", "b"])
+
+        defs = load_dag_schema_dict()["definitions"]
+        validator = jsonschema.Draft7Validator({"dependencies": defs["operator"]["dependencies"]})
+        task_var = DagSerialization.to_dict(dag)["dag"]["tasks"][0]["__var"]
+        validator.validate(task_var)  # control: the real mapped task is valid
+
+        broken = copy.deepcopy(task_var)
+        del broken[missing_key]
+        with pytest.raises(jsonschema.ValidationError, match="is a dependency of"):
+            validator.validate(broken)
+
     def test_task_resources(self):
         """
         Test task resources serialization/deserialization.
