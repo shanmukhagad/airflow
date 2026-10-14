@@ -44,6 +44,9 @@ from airflow.api_fastapi.auth.tokens import (
     get_sig_validation_args,
     get_signing_args,
 )
+from airflow.models.taskinstance import TaskInstance
+from airflow.utils.session import create_session
+from airflow.utils.state import TerminalTIState
 
 if TYPE_CHECKING:
     import httpx
@@ -135,6 +138,12 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _get_task_instance_state(task_instance_id: str):
+    with create_session() as session:
+        task_instance = session.get(TaskInstance, task_instance_id)
+        return task_instance.state if task_instance else None
+
+
 class JWTReissueMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
@@ -152,6 +161,11 @@ class JWTReissueMiddleware(BaseHTTPMiddleware):
                     # wait times so avoid refreshing them. If avalidated_claims
                     # raises for a workload token, the outer except handles it.
                     if claims.get("scope") == "workload":
+                        return response
+                    task_instance_state = await asyncio.to_thread(
+                        _get_task_instance_state, claims["sub"]
+                    )
+                    if task_instance_state is not None and task_instance_state in TerminalTIState:
                         return response
 
                     now = int(time.time())

@@ -1345,6 +1345,41 @@ class TestCancelBackfill(TestBackfillEndpoint):
         states = [x.state for x in dag_runs]
         assert states == ["running", "failed", "failed", "failed", "failed"]
 
+    def test_cleared_run_of_cancelled_backfill_is_set_running(self, dag_maker, session, test_client):
+        with dag_maker(schedule="@daily") as dag:
+            PythonOperator(task_id="hi", python_callable=print)
+        b = _create_backfill(
+            dag_id=dag.dag_id,
+            from_date=timezone.datetime(2021, 1, 1),
+            to_date=timezone.datetime(2021, 1, 2),
+            max_active_runs=2,
+            reverse=False,
+            dag_run_conf={},
+            triggering_user_name="test_user",
+        )
+        query = (
+            select(DagRun)
+            .join(BackfillDagRun.dag_run)
+            .where(BackfillDagRun.backfill_id == b.id)
+            .order_by(BackfillDagRun.sort_ordinal)
+        )
+        dag_runs = session.scalars(query).all()
+        queued_ids = {dr.id for dr in DagRun.get_queued_dag_runs_to_set_running(session)}
+        assert {dr.id for dr in dag_runs} <= queued_ids
+
+        dag_runs[0].state = DagRunState.SUCCESS
+        session.commit()
+        response = test_client.put(f"/backfills/{b.id}/cancel")
+        assert response.status_code == 200
+
+        session.expunge_all()
+        finished_run = session.scalars(query).first()
+        finished_run.state = DagRunState.QUEUED
+        session.commit()
+
+        queued_ids = {dr.id for dr in DagRun.get_queued_dag_runs_to_set_running(session)}
+        assert finished_run.id in queued_ids
+
     def test_cancel_backfill_not_found(self, test_client):
         response = test_client.put("/backfills/999999/cancel")
         assert response.status_code == 404

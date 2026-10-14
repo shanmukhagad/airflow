@@ -331,3 +331,15 @@ def test_filters(env, name, expected):
     when = datetime(2012, 7, 24, 3, 4, 52, tzinfo=timezone.utc)
     result = env.from_string("{{ date |" + name + " }}").render(date=when)
     assert result == expected
+
+
+def test_get_template_env_handles_serialized_dag():
+    templater = Templater()
+
+    # Mock a SerializedDAG object (which does not have get_template_env)
+    mock_serialized_dag = MagicMock(spec=["dag_id", "task_ids"])
+
+    # Should fall back to SandboxedEnvironment without raising AttributeError
+    env = templater.get_template_env(dag=mock_serialized_dag)
+    assert env is not None
+

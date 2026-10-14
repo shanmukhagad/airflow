@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import ClientError
+
 from airflow.providers.amazon.aws.hooks.base_aws import AwsGenericHook
 from airflow.providers.amazon.aws.utils.waiter_with_logging import wait
 
@@ -80,11 +82,46 @@ class AppflowHook(AwsGenericHook["AppflowClient"]):
 
         return execution_id
 
-    def _log_execution_description(self, flow_name: str, execution_id: str):
-        response_desc = self.conn.describe_flow_execution_records(flowName=flow_name)
-        last_execs = {fe["executionId"]: fe for fe in response_desc["flowExecutions"]}
-        exec_details = last_execs[execution_id]
-        self.log.info("Run complete, execution details: %s", exec_details)
+    def _log_execution_description(self, flow_name: str, execution_id: str, max_pages: int = 10) -> None:
+        next_token = None
+        exec_details = None
+        page_count = 0
+
+        while page_count < max_pages:
+            page_count += 1
+            kwargs = {"flowName": flow_name, "maxResults": 100}
+            if next_token:
+                kwargs["nextToken"] = next_token
+
+            try:
+                response_desc = self.conn.describe_flow_execution_records(**kwargs)
+            except ClientError as e:
+                self.log.warning(
+                    "Failed to fetch execution details for execution ID %s due to API error: %s",
+                    execution_id,
+                    e,
+                )
+                return
+
+            for fe in response_desc.get("flowExecutions", []):
+                if fe.get("executionId") == execution_id:
+                    exec_details = fe
+                    break
+
+            if exec_details:
+                break
+
+            next_token = response_desc.get("nextToken")
+            if not next_token:
+                break
+
+        if exec_details:
+            self.log.info("Run complete, execution details: %s", exec_details)
+        else:
+            self.log.warning(
+                "Run complete, but execution details for execution ID %s were not found in execution history.",
+                execution_id,
+            )
 
     def update_flow_filter(self, flow_name: str, filter_tasks, set_trigger_ondemand: bool = False) -> None:
         """

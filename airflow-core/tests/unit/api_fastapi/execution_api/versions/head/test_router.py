@@ -24,6 +24,7 @@ from fastapi import FastAPI
 
 from airflow.api_fastapi.auth.tokens import JWTValidator
 from airflow.api_fastapi.execution_api.app import lifespan
+from airflow.utils.state import State
 
 
 @pytest.fixture
@@ -45,12 +46,14 @@ def exec_app(client):
 )
 @pytest.mark.db_test
 def test_expiring_token_is_reissued(
-    client, exec_app: FastAPI, time_machine, age, validity, expect_refreshed_token
+    client, exec_app: FastAPI, time_machine, create_task_instance, age, validity, expect_refreshed_token
 ):
     moment = 1743451846  # A "random" unix epoch timestamp.
+    ti = create_task_instance(state=State.RUNNING)
+
     auth = AsyncMock(spec=JWTValidator)
     auth.avalidated_claims.return_value = {
-        "sub": "edb09971-4e0e-4221-ad3f-800852d38085",
+        "sub": str(ti.id),
         "iat": moment,
         "exp": moment + validity,
     }
@@ -67,3 +70,32 @@ def test_expiring_token_is_reissued(
         assert "Refreshed-API-Token" in response.headers
     else:
         assert "Refreshed-API-Token" not in response.headers
+
+@pytest.mark.parametrize(
+    "state",
+    [State.SUCCESS, State.FAILED, State.SKIPPED, State.UPSTREAM_FAILED, State.REMOVED],
+)
+@pytest.mark.db_test
+def test_expiring_token_is_not_reissued_after_task_instance_finishes(
+    client, session, create_task_instance, time_machine, state
+):
+    moment = 1743451846
+    ti = create_task_instance(state=state)
+    session.commit()
+
+    auth = AsyncMock(spec=JWTValidator)
+    auth.avalidated_claims.return_value = {
+        "sub": str(ti.id),
+        "iat": moment,
+        "exp": moment + 60,
+    }
+
+    time_machine.move_to(moment + 31, tick=False)
+    lifespan.registry.register_value(JWTValidator, auth)
+
+    response = client.get(
+        "/execution/variables/key1",
+        headers={"Authorization": "Bearer dummy"},
+    )
+
+    assert "Refreshed-API-Token" not in response.headers
