@@ -1241,6 +1241,15 @@ class TestSparkSubmitHook:
         assert command_masked == expected
 
     @pytest.mark.db_test
+    def test_masks_passwords_with_long_non_sensitive_argument(self) -> None:
+        hook = SparkSubmitHook()
+        long_argument = "a" * 50_000 + "!"
+
+        command_masked = hook._mask_cmd(("spark-submit", long_argument))
+
+        assert command_masked == f"spark-submit {long_argument}"
+
+    @pytest.mark.db_test
     def test_create_keytab_path_from_base64_keytab_with_decode_exception(self):
         hook = SparkSubmitHook()
         invalid_base64 = "invalid_base64"
