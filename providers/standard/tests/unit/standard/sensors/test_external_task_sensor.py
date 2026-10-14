@@ -1466,9 +1466,13 @@ class TestExternalTaskSensorV3:
         )
         assert op.external_dates_filter == DEFAULT_DATE.isoformat()
 
-    @pytest.mark.execution_timeout(10)
-    def test_check_existence_raises_when_task_not_found(self,dag_maker):
-        with dag_maker ("test_dag_child"):
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_raises_when_task_not_found(self, mock_method, dag_maker):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = False
+        mock_method.return_value = mock_version
+
+        with dag_maker("test_dag_child"):
             op = ExternalTaskSensor(
                 task_id="test_external_task_sensor_check",
                 external_dag_id="test_dag_parent",
@@ -1476,22 +1480,22 @@ class TestExternalTaskSensorV3:
                 check_existence=True,
             )
 
-        self.context["ti"].get_dr_count = mock.MagicMock(return_value=1)
-
-        with pytest.raises(ExternalTaskNotFoundError): 
+        with pytest.raises(ExternalTaskNotFoundError):
             op.execute(context=self.context)
 
-    @pytest.mark.execution_timeout(10)
-    def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,dag_maker):
-        with dag_maker ("test_dag_child"):
-            op = ExternalTaskSensor(
-                task_id = "test_external_task_sensor_check",
-                external_dag_id="test_dag_parent",
-                external_task_id="non_existing_task",
-                check_existence=True,
-            )
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,mock_method,dag_maker):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = True
+        mock_method.return_value = mock_version
 
-        self.context["ti"].get_dr_count = mock.MagicMock(return_value=0)
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+            task_id="test_external_task_sensor_check",
+            external_dag_id="test_dag_parent",
+            external_task_id="non_existing_task",
+            check_existence=True,
+            )
 
         assert op.poke(context=self.context) is False
 

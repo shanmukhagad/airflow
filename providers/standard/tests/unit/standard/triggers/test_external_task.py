@@ -224,12 +224,14 @@ class TestWorkflowTrigger:
         mock_sleep.assert_awaited()
         assert mock_sleep.await_count == 1
 
-    @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_dr_count")
+    @mock.patch("airflow.providers.standard.triggers.external_task.DagVersion.get_latest_version")
     @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_ti_count")
     @pytest.mark.asyncio
-    async def test_check_existence_raises_when_task_not_found(self, mock_get_ti_count, mock_get_dr_count):
+    async def test_check_existence_raises_when_task_not_found(self, mock_get_ti_count, mock_dag_version):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = False
+        mock_dag_version.return_value = mock_version
         mock_get_ti_count.return_value = 0
-        mock_get_dr_count.return_value = 1
 
         trigger = WorkflowTrigger(
             external_dag_id=self.DAG_ID,
@@ -246,14 +248,16 @@ class TestWorkflowTrigger:
             await gen.__anext__()
 
     @pytest.mark.execution_timeout (10)
-    @mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_dr_count")
+    @mock.patch("airflow.providers.standard.triggers.external_task.DagVersion.get_latest_version")
     @mock.patch("asyncio.sleep", new_callable=mock.AsyncMock)
     @pytest.mark.asyncio
-    #@mock.patch("airflow.sdk.execution_time.task_runner.RuntimeTaskInstance.get_ti_count")
     
-    async def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,mock_sleep, mock_get_dr_count):
-        #mock_get_ti_count.side_effect = [0.1]
-        mock_get_dr_count.return_value = 0
+    async def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,mock_sleep, mock_dag_version):
+        
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = True
+        mock_dag_version.return_value = mock_version
+
         trigger = WorkflowTrigger(
             external_dag_id = self.DAG_ID,
             logical_dates = [self.LOGICAL_DATE],
