@@ -174,11 +174,23 @@ class TestSerializers:
             ),
         ],
     )
+
     def test_datetime_deserialize_errors(self, klass, version, payload, msg):
         from airflow.sdk.serde.serializers.datetime import deserialize
 
         with pytest.raises(TypeError, match=msg):
             deserialize(klass, version, payload)
+
+
+    def test_datetime_deserialize_newer_version(self):
+        from airflow.sdk.serde import deserialize as serde_deserialize
+        from airflow.sdk.serde import serialize as serde_serialize
+
+        payload = serde_serialize(datetime.timedelta(seconds=60))
+        payload["__version__"] = 999
+
+        with pytest.raises(TypeError, match=r"serialized 999 of datetime\.timedelta > 2"):
+            serde_deserialize(payload)
 
     def test_deserialize_legacy_datetime_bare_timestamp(self):
         """Legacy BaseSerialization stored datetimes as ``{"__type": "datetime", "__var": <utc ts>}``.
@@ -774,6 +786,17 @@ class TestSerializers:
 
         with pytest.raises(TypeError, match=msg):
             deserialize(klass, version, payload)
+
+
+    def test_uuid_deserialize_newer_version(self):
+        from airflow.sdk.serde import deserialize as serde_deserialize
+        from airflow.sdk.serde import serialize as serde_serialize
+
+        payload = serde_serialize(uuid.UUID("12345678-1234-5678-1234-567812345678"))
+        payload["__version__"] = 999
+
+        with pytest.raises(TypeError, match=r"serialized 999 of uuid\.UUID > 1"):
+            serde_deserialize(payload)
 
     def test_serde_serialize_recursion_limit(self):
         depth = MAX_RECURSION_DEPTH
