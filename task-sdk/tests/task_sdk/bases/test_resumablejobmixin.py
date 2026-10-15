@@ -140,6 +140,20 @@ class TestFirstSubmission:
 
 
 class TestRetryWithDifferentJobStatuses:
+    def test_reconnect_returns_get_job_result(self):
+        """Verify reconnecting calls get_job_result after poll_until_complete."""
+        op = ConcreteResumableOperator(task_id="test_task")
+        op._status_map["job-001"] = "RUNNING"
+        op.get_job_result = mock.MagicMock(return_value={"reconnect": "success"})
+        task_state = FakeTaskState({"test_job_id": "job-001"})
+        ctx = make_context(task_state)
+
+        result = op.execute_resumable(ctx)
+
+        assert op.polled_ids == ["job-001"]
+        op.get_job_result.assert_called_once_with("job-001", ctx)
+        assert result == {"reconnect": "success"}
+
     def test_skips_submission_when_job_active(self):
         op = ConcreteResumableOperator(task_id="test_task")
         op._status_map["job-001"] = "RUNNING"
