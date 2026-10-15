@@ -20,8 +20,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, cast
 
-from fastapi import Depends, HTTPException, status
-from sqlalchemy import and_, delete, func, select
+from fastapi import Depends, HTTPException, Query, status
+from sqlalchemy import and_, delete, exists, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import joinedload, subqueryload
 
@@ -129,6 +129,25 @@ class OnlyActiveFilter(BaseParam[bool]):
         return cls().set_value(only_active)
 
 
+class HasEventsFilter(BaseParam[bool]):
+    """Filter assets on whether they have at least one asset event."""
+
+    def to_orm(self, select: Select) -> Select:
+        if self.value is None:
+            return select
+        has_event = exists().where(AssetEvent.asset_id == AssetModel.id)
+        return select.where(has_event if self.value else ~has_event)
+
+    @classmethod
+    def depends(
+        cls,
+        has_events: bool | None = Query(
+            None, description="Only assets with at least one asset event (true) or with none (false)."
+        ),
+    ) -> HasEventsFilter:
+        return cls().set_value(has_events)
+
+
 @assets_router.get(
     "/assets",
     responses=create_openapi_http_exception_doc([status.HTTP_404_NOT_FOUND]),
@@ -146,6 +165,7 @@ def get_assets(
     uri_prefix_pattern: QueryUriPrefixPatternSearch,
     dag_ids: QueryAssetDagIdPatternSearch,
     only_active: Annotated[OnlyActiveFilter, Depends(OnlyActiveFilter.depends)],
+    has_events: Annotated[HasEventsFilter, Depends(HasEventsFilter.depends)],
     order_by: Annotated[
         SortParam,
         Depends(SortParam(["id", "name", "uri", "created_at", "updated_at"], AssetModel).dynamic_depends()),
@@ -187,7 +207,15 @@ def get_assets(
 
     assets_select, total_entries = paginated_select(
         statement=assets_select_statement,
-        filters=[only_active, name_pattern, name_prefix_pattern, uri_pattern, uri_prefix_pattern, dag_ids],
+        filters=[
+            only_active,
+            name_pattern,
+            name_prefix_pattern,
+            uri_pattern,
+            uri_prefix_pattern,
+            dag_ids,
+            has_events,
+        ],
         order_by=order_by,
         offset=offset,
         limit=limit,
