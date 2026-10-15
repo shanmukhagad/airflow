@@ -1499,6 +1499,21 @@ class TestExternalTaskSensorV3:
 
         assert op.poke(context=self.context) is False
 
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_raises_when_dag_version_is_none(self, mock_method, dag_maker):
+        mock_method.return_value = None
+    
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+            task_id="test_external_task_sensor_check",
+            external_dag_id="test_dag_parent",
+            external_task_id="non_existing_task",
+            check_existence=True,
+            )
+    
+        with pytest.raises(ExternalDagNotFoundError):
+            op.execute(context=self.context)
+
 
     @pytest.mark.execution_timeout(10)
     def test_external_task_sensor_task_group_failed_states(self, dag_maker):

@@ -28,7 +28,10 @@ from airflow.providers.standard.triggers.external_task import DagStateTrigger, W
 from airflow.triggers.base import TriggerEvent
 from airflow.utils import timezone
 from airflow.utils.state import DagRunState
-from airflow.providers.standard.exceptions import ExternalTaskNotFoundError
+from airflow.providers.standard.exceptions import (
+    ExternalTaskNotFoundError, 
+    ExternalTaskGroupNotFoundError,
+)
 
 from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
 
@@ -276,6 +279,49 @@ class TestWorkflowTrigger:
         result = trigger_task.result()
         assert result.payload == {"status":"success"}
         mock_sleep.assert_awaited_once()
+
+    @mock.patch ("airflow.providers.standard.triggers.external_task.DagVersion.get_latest_version")
+    @pytest.mark.asyncio
+    async def test_check_existence_raises_when_task_group_not_found (self, mock_dag_version):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.task_group_dict = {}
+        mock_dag_version.return_value = mock_version
+
+        trigger = WorkflowTrigger(
+            external_dag_id=self.DAG_ID,
+            logical_dates=[self.LOGICAL_DATE],
+            run_ids=[self.RUN_ID],
+            external_task_ids=[self.TASK_ID],
+            allowed_states=self.STATES,
+            poke_interval=0.2,
+            external_task_group_id="nonexistent_group",
+            check_existence=True,
+            )
+
+        gen = trigger.run()
+        with pytest.raises(ExternalTaskGroupNotFoundError):
+            await gen.__anext__()
+
+    @mock.patch("airflow.providers.standard.triggers.external_task.DagVersion.get_latest_version")
+    @pytest.mark.asyncio
+    async def test_check_existence_raises_for_one_nonexistent_task_among_multiple (self, mock_dag_version):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.side_effect = lambda task_id:task_id == "task_a"
+        mock_dag_version.return_value = mock_version
+
+        trigger = WorkflowTrigger(
+            external_dag_id=self.DAG_ID,
+            logical_dates=[self.LOGICAL_DATE],
+            run_ids=[self.RUN_ID],
+            external_task_ids=["task_a","task_b"],
+            allowed_states=self.STATES,
+            poke_interval=0.2,
+            check_existence=True,
+            )
+        
+        gen = trigger.run()
+        with pytest.raises(ExternalTaskNotFoundError):
+            await gen.__anext__()
 
     @pytest.mark.parametrize(
         (
