@@ -342,6 +342,21 @@ class TestDataflowHook:
         )
         method_wait_for_done.assert_called_once_with()
 
+    @mock.patch(DATAFLOW_STRING.format("_DataflowJobsController"))
+    @mock.patch(DATAFLOW_STRING.format("DataflowHook.get_conn"))
+    def test_fetch_job_id_by_name(self, mock_conn, mock_controller):
+        controller = mock_controller.return_value
+        controller._fetch_jobs_by_prefix_name.return_value = [{"id": "TEST_JOB_ID_123"}]
+
+        res = self.dataflow_hook.fetch_job_id_by_name(
+            job_name="JOB_NAME",
+            project_id=TEST_PROJECT_ID,
+            location=TEST_LOCATION,
+        )
+
+        controller._fetch_jobs_by_prefix_name.assert_called_once_with("job_name")
+        assert res == "TEST_JOB_ID_123"
+
 
 @pytest.mark.db_test
 class TestDataflowTemplateHook:
