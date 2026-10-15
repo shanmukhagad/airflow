@@ -1135,6 +1135,48 @@ class TestKubernetesPodOperator:
             k.execute(context=context)
 
     @pytest.mark.parametrize(
+        ("base_container_exit_code", "expect_failure"),
+        [
+            (0, False),
+            (1, True),
+        ],
+    )
+    @patch(f"{KPO_MODULE}.container_is_succeeded")
+    @patch(f"{KPO_MODULE}.KubernetesPodOperator.process_pod_deletion")
+    @patch(f"{KPO_MODULE}.KubernetesPodOperator.patch_already_checked")
+    def test_cleanup_with_skip_waiting_for_sidecars(
+        self,
+        mock_patch,
+        mock_delete,
+        mock_container_succeeded,
+        base_container_exit_code,
+        expect_failure,
+    ):
+        """
+        When skip_waiting_for_sidecars=True, cleanup should determine success/failure
+        based on the base container's exit status even if pod phase is Running.
+        """
+        mock_container_succeeded.return_value = base_container_exit_code == 0
+
+        remote_pod = MagicMock()
+        remote_pod.status.phase = "Running"
+
+        k = KubernetesPodOperator(
+            task_id="test",
+            name="test-pod",
+            image="test-image",
+            skip_waiting_for_sidecars=True,
+        )
+
+        if expect_failure:
+            with pytest.raises(AirflowException, match="returned a failure"):
+                k.cleanup(pod=MagicMock(), remote_pod=remote_pod)
+        else:
+            k.cleanup(pod=MagicMock(), remote_pod=remote_pod)
+
+        mock_container_succeeded.assert_called_once_with(remote_pod, k.base_container_name)
+
+    @pytest.mark.parametrize(
         ("task_kwargs", "should_be_deleted"),
         [
             pytest.param({}, True, id="default"),  # default values
