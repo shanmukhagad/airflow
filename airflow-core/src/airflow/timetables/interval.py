@@ -176,8 +176,16 @@ class CronDataIntervalTimetable(CronMixin, _DataIntervalTimetable):
             raise AssertionError("next schedule shouldn't be earlier")
         if earliest is None:
             return new_start
-        return max(new_start, self._align_to_next(earliest))
 
+        aligned = self._align_to_next(earliest)
+        if aligned > earliest:
+            interval_start = self._get_prev(aligned)
+            # Only use the active interval if its end time (aligned) is in the future
+            if aligned > current_time:
+                aligned = interval_start
+
+        return max(new_start, aligned)
+    
     def infer_manual_data_interval(self, *, run_after: DateTime) -> DataInterval:
         # Get the last complete period before run_after, e.g. if a DAG run is
         # scheduled at each midnight, the data interval of a manually triggered
