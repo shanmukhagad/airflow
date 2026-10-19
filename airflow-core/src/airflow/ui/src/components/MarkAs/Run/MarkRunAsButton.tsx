@@ -28,7 +28,7 @@ import { IconButton, Menu, Tooltip } from "src/components/ui";
 import { SHORTCUTS } from "src/context/keyboardShortcuts";
 import { useShortcut } from "src/hooks/useShortcut";
 
-import { allowedStates } from "../utils";
+import { dagRunAllowedStates } from "../utils";
 import MarkRunAsDialog from "./MarkRunAsDialog";
 
 type Props = {
@@ -76,7 +76,7 @@ const MarkRunAsButton = ({ dagRun, isHotkeyEnabled = false }: Props) => {
           </IconButton>
         </Menu.Trigger>
         <Menu.Content>
-          {allowedStates.map((menuState) => {
+          {dagRunAllowedStates.map((menuState) => {
             const content = translate(
               `dags:runAndTaskActions.markAs.buttonTooltip.${menuState === "success" ? "success" : "failed"}`,
             );
