@@ -266,6 +266,39 @@ class TestClient:
             assert response.status_code == 200
             assert len(responses) == 1
 
+    def test_clients_use_independent_retry_settings(self):
+        responses_a = [httpx.Response(500, text="Internal Server Error") for _ in range(3)]
+        responses_b = [httpx.Response(500, text="Internal Server Error") for _ in range(4)]
+
+        client_a = Client(
+            base_url=None,
+            dry_run=True,
+            token="",
+            api_retries=2,
+            api_retry_wait_min=0,
+            api_retry_wait_max=0,
+            mounts={"'http://": httpx.MockTransport(lambda request: responses_a.pop(0))},
+        )
+
+        client_b = Client(
+            base_url=None,
+            dry_run=True,
+            token="",
+            api_retries=3,
+            api_retry_wait_min=0,
+            api_retry_wait_max=0,
+            mounts={"'http://": httpx.MockTransport(lambda request: responses_b.pop(0))},
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client_a.get("http://error")
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client_b.get("http://error")
+
+        assert len(responses_a) == 1
+        assert len(responses_b) == 1
+
     def test_token_renewal(self):
         responses: list[httpx.Response] = [
             httpx.Response(200, json={"ok": "1"}),
@@ -1045,6 +1078,51 @@ class TestXCOMOperations:
                     key="key",
                 )
 
+    def test_xcom_get_not_found_logs_warning(self, cap_structlog):
+        """A missing XCom is an expected case, so it is logged at WARNING, not ERROR (#73175)."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/xcoms/dag_id/run_id/task_id/key":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "XCom not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.xcoms.get(dag_id="dag_id", run_id="run_id", task_id="task_id", key="key")
+
+        assert isinstance(result, XComResponse)
+        assert result.key == "key"
+        assert result.value is None
+        assert {"log_level": "warning", "event": "XCom not found"} in cap_structlog
+        assert {"log_level": "error", "event": "XCom not found"} not in cap_structlog
+
+    def test_xcom_get_sequence_item_not_found_logs_warning(self, cap_structlog):
+        """A missing XCom sequence item is logged at WARNING, not ERROR (#73175)."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/xcoms/dag_id/run_id/task_id/key/item/0":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "XCom not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.xcoms.get_sequence_item(
+                dag_id="dag_id", run_id="run_id", task_id="task_id", key="key", offset=0
+            )
+
+        assert isinstance(result, ErrorResponse)
+        assert result.error == ErrorType.XCOM_NOT_FOUND
+        assert {"log_level": "warning", "event": "XCom not found"} in cap_structlog
+        assert {"log_level": "error", "event": "XCom not found"} not in cap_structlog
+
     @pytest.mark.parametrize(
         "values",
         [
@@ -1295,6 +1373,28 @@ class TestAssetOperations:
 
         assert isinstance(result, ErrorResponse)
         assert result.error == ErrorType.ASSET_NOT_FOUND
+
+    def test_get_not_found_logs_warning(self, cap_structlog):
+        """A missing asset is an expected case, so it is logged at WARNING, not ERROR."""
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/assets/by-name":
+                return httpx.Response(
+                    status_code=404,
+                    json={"detail": {"message": "Asset not found", "reason": "not_found"}},
+                )
+            return httpx.Response(status_code=400, json={"detail": "Bad Request"})
+
+        client = make_client(transport=httpx.MockTransport(handle_request))
+
+        with cap_structlog.at_level("debug"):
+            result = client.assets.get(name="missing_asset")
+
+        assert isinstance(result, ErrorResponse)
+        assert result.error == ErrorType.ASSET_NOT_FOUND
+        assert result.detail == {"name": "missing_asset"}
+        assert {"log_level": "warning", "event": "Asset not found"} in cap_structlog
+        assert {"log_level": "error", "event": "Asset not found"} not in cap_structlog
 
     def test_get_by_alias_returns_list(self):
         def handle_request(request: httpx.Request) -> httpx.Response:

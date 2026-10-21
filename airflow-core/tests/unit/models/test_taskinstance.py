@@ -67,6 +67,7 @@ from airflow.models.taskinstance import (
     TaskInstance,
     TaskInstance as TI,
     TaskInstanceNote,
+    _get_new_task_ids,
     clear_task_instances,
     find_relevant_relatives,
 )
@@ -4263,3 +4264,24 @@ class TestTaskInstanceStatsTagsTeamName:
             mock.ANY,
             tags=expected_tags,
         )
+
+@mock.patch("airflow.models.taskinstance.select")
+@mock.patch("airflow.models.dagbag.DBDagBag")
+def test_get_new_task_ids_uses_ti_rows(mock_dagbag_cls, mock_select):
+    """Verify _get_new_task_ids compares latest DAG tasks against existing TI rows (#71455)."""
+    mock_session = mock.MagicMock()
+
+    mock_dag_run = mock.MagicMock()
+
+    mock_latest_dag = mock.MagicMock()
+    mock_latest_dag.task_ids = ["task_a", "task_b", "task_c"]
+
+    mock_dagbag = mock_dagbag_cls.return_value
+    mock_dagbag.get_latest_version_of_dag.return_value = mock_latest_dag
+
+    mock_session.scalar.return_value = mock_dag_run
+    mock_session.scalars.return_value.all.return_value = ["task_a"]
+
+    new_task_ids = _get_new_task_ids("test_dag", "test_run", mock_session)
+
+    assert sorted(new_task_ids) == ["task_b", "task_c"]

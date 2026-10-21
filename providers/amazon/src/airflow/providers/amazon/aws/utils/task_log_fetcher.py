@@ -99,25 +99,33 @@ class AwsTaskLogFetcher(Thread):
         self.hook = AwsLogsHook(aws_conn_id=aws_conn_id, region_name=region_name)
 
     def run(self) -> None:
-        continuation_token = AwsLogsHook.ContinuationToken()
-        while not self.is_stopped():
-            time.sleep(self.fetch_interval.total_seconds())
-            log_events = self._get_log_events(continuation_token)
+            continuation_token = AwsLogsHook.ContinuationToken()
             prev_timestamp_event = None
-            for log_event in log_events:
-                current_timestamp_event = datetime.fromtimestamp(
-                    log_event["timestamp"] / 1000.0, tz=timezone.utc
-                )
-                if current_timestamp_event == prev_timestamp_event:
-                    # When multiple events have the same timestamp, somehow, only one event is logged
-                    # As a consequence, some logs are missed in the log group (in case they have the same
-                    # timestamp)
-                    # When a slight delay is added before logging the event, that solves the issue
-                    # See https://github.com/apache/airflow/issues/40875
-                    time.sleep(0.001)
-                level = _parse_log_level(log_event["message"])
-                self.logger.log(level, self.event_to_str(log_event))
-                prev_timestamp_event = current_timestamp_event
+
+            # 1. Helper function
+            def _fetch_and_log():
+                nonlocal prev_timestamp_event
+                log_events = self._get_log_events(continuation_token)
+                
+                for log_event in log_events:
+                    current_timestamp_event = datetime.fromtimestamp(
+                        log_event["timestamp"] / 1000.0, tz=timezone.utc
+                    )
+                        
+                    level = _parse_log_level(log_event["message"])
+                    self.logger.log(level, self.event_to_str(log_event))
+                    prev_timestamp_event = current_timestamp_event
+
+            # 2. Main loop
+            while not self.is_stopped():
+                # THE FIX: Threading non-blocking wait.
+                if self._event.wait(timeout=self.fetch_interval.total_seconds()):
+                    break
+                _fetch_and_log()
+
+            # 3. Final call after loop breaks
+            _fetch_and_log()
+
 
     def _get_log_events(self, skip_token: AwsLogsHook.ContinuationToken | None = None) -> Generator:
         if skip_token is None:

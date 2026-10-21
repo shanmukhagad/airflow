@@ -48,6 +48,7 @@ from airflow._shared.observability.metrics.base_stats_logger import StatsLogger
 from airflow._shared.observability.traces import OverrideableRandomIdGenerator
 from airflow._shared.timezones import timezone
 from airflow.callbacks.callback_requests import DagCallbackRequest, DagRunContext
+from airflow.models.backfill import Backfill, _create_backfill
 from airflow.models.dag import DagModel, infer_automated_data_interval
 from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun, DagRunNote, clear_partition_runs
@@ -147,6 +148,7 @@ class TestDagRun:
 
     @staticmethod
     def _clean_db():
+        db.clear_db_backfills()
         db.clear_db_runs()
         db.clear_db_pools()
         db.clear_db_dags()
@@ -1096,6 +1098,37 @@ class TestDagRun:
 
         runs = func(session).all()
         assert runs == []
+
+    @pytest.mark.parametrize(
+        ("is_paused", "is_completed", "expected_to_run"),
+        [
+            pytest.param(False, False, True, id="not_paused"),
+            pytest.param(True, False, False, id="paused_in_progress"),
+            pytest.param(True, True, True, id="paused_and_completed"),
+        ],
+    )
+    def test_queued_backfill_run_respects_pause_only_while_in_progress(
+        self, dag_maker, session, is_paused, is_completed, expected_to_run
+    ):
+        with dag_maker(schedule="@daily") as dag:
+            EmptyOperator(task_id="dummy")
+        b = _create_backfill(
+            dag_id=dag.dag_id,
+            from_date=timezone.datetime(2021, 1, 1),
+            to_date=timezone.datetime(2021, 1, 1),
+            max_active_runs=1,
+            reverse=False,
+            dag_run_conf={},
+            triggering_user_name="test_user",
+        )
+        backfill = session.get(Backfill, b.id)
+        backfill.is_paused = is_paused
+        backfill.completed_at = timezone.utcnow() if is_completed else None
+        session.commit()
+
+        dag_run = session.scalars(select(DagRun).where(DagRun.backfill_id == backfill.id)).one()
+        queued_ids = {dr.id for dr in DagRun.get_queued_dag_runs_to_set_running(session)}
+        assert (dag_run.id in queued_ids) is expected_to_run
 
     @mock.patch("airflow._shared.observability.metrics.stats.timing")
     def test_no_scheduling_delay_for_nonscheduled_runs(self, stats_mock, session, testing_dag_bundle):
@@ -4885,3 +4918,62 @@ class TestApplyPartitionDateWindowSubDay:
             session=session,
         )
         assert cleared == 3
+
+
+def test_mapped_expansion_with_detached_dag_run(dag_maker, session):
+    dag, mapped, dr = _make_mapped_dag_for_expansion(dag_maker, session, dag_id="test_detached_dag_run")
+
+    # Get the unmapped TaskInstance that expand_mapped_task will use.
+    unmapped_ti = session.scalar(
+        select(TI).where(
+            TI.dag_id == dag.dag_id,
+            TI.task_id == mapped.task_id,
+            TI.run_id == dr.run_id,
+            TI.map_index == -1,
+        )
+    )
+
+    assert unmapped_ti is not None
+
+    # The relationship is eagerly joined, so the DagRun is initially available.
+    detached_dr = unmapped_ti.dag_run
+    assert detached_dr is not None
+
+    # Explicitly detach the DagRun from SQLAlchemy.
+    session.expire(detached_dr, ["context_carrier"])
+    session.expunge(detached_dr)
+
+    assert sa_inspect(detached_dr).detached
+    assert "context_carrier" in sa_inspect(detached_dr).expired_attributes
+
+    unmapped_ti.dag_run = detached_dr
+
+    expand_mapped_task(
+        dag.task_dict[mapped.task_id],
+        dr.run_id,
+        "op1",
+        length=3,
+        session=session,
+    )
+
+def test_dag_versions_does_not_short_circuit_on_bundle_version():
+    """Verify DagRun.dag_versions evaluates TI versions even when bundle_version is set (#71454)."""
+    dag_run = DagRun()
+    dag_run.bundle_version = "v1.0"
+
+    dag_version_1 = mock.MagicMock(id=1)
+    dag_version_2 = mock.MagicMock(id=2)
+
+    dag_run._prefetched_dag_version_ids = None
+
+    with mock.patch.object(
+        DagRun, "_tih_dag_versions", new_callable=mock.PropertyMock
+    ) as mock_tih, mock.patch.object(
+        DagRun, "_ti_dag_versions", new_callable=mock.PropertyMock
+    ) as mock_ti:
+        mock_tih.return_value = [dag_version_1]
+        mock_ti.return_value = [dag_version_2]
+
+        versions = dag_run.dag_versions
+
+        assert versions == [dag_version_1, dag_version_2]

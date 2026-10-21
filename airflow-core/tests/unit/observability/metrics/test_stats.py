@@ -100,3 +100,14 @@ class TestDogStats:
             assert isinstance(backend.dogstatsd, DogStatsd)
             assert not hasattr(backend, "statsd")
         importlib.reload(airflow.observability.stats)
+
+    @mock.patch("airflow.shared.observability.metrics.datadog_logger.DogStatsd")
+    def test_dogstatsd_initialized_with_use_ms_true(self, mock_dogstatsd):
+        """Test that get_dogstatsd_logger initializes DogStatsd with use_ms=True."""
+        from airflow.shared.observability.metrics.datadog_logger import get_dogstatsd_logger
+
+        get_dogstatsd_logger()
+
+        mock_dogstatsd.assert_called_once()
+        _, kwargs = mock_dogstatsd.call_args
+        assert kwargs.get("use_ms") is True

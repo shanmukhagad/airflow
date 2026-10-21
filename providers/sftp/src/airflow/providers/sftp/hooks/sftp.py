@@ -594,11 +594,12 @@ class SFTPHook(SSHHook):
         :param path: full path to the remote file
         """
         ftp_mdtm = self.conn.stat(path).st_mtime  # type: ignore[union-attr]
-        return datetime.datetime.fromtimestamp(ftp_mdtm).strftime("%Y%m%d%H%M%S")  # type: ignore
+        return datetime.datetime.fromtimestamp(ftp_mdtm, tz=datetime.timezone.utc).strftime("%Y%m%d%H%M%S") # type: ignore
+
 
     @handle_connection_management
     def path_exists(self, path: str) -> bool:
-        """
+        """ 
         Whether a remote entity exists.
 
         :param path: full path to the remote file or directory
@@ -1064,7 +1065,7 @@ class SFTPHookAsync(BaseHook):
                 try:
                     ftp_mdtm = await sftp.stat(path)
                     modified_time = ftp_mdtm.mtime
-                    mod_time = datetime.datetime.fromtimestamp(modified_time).strftime("%Y%m%d%H%M%S")  # type: ignore[arg-type]
+                    mod_time = datetime.datetime.fromtimestamp(modified_time, tz=datetime.timezone.utc).strftime("%Y%m%d%H%M%S")  # type: ignore[arg-type]
                     self.log.info("Found File %s last modified: %s", str(path), str(mod_time))
                     return mod_time
                 except asyncssh.SFTPNoSuchFile:

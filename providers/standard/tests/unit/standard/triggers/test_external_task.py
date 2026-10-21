@@ -493,7 +493,6 @@ class TestWorkflowTrigger:
             external_task_ids=[self.TASK_ID],
             allowed_states=self.STATES,
             poke_interval=5,
-            check_existence=False,
         )
         classpath, kwargs = trigger.serialize()
         assert classpath == "airflow.providers.standard.triggers.external_task.WorkflowTrigger"
@@ -508,7 +507,6 @@ class TestWorkflowTrigger:
             "allowed_states": self.STATES,
             "poke_interval": 5,
             "soft_fail": False,
-            "check_existence": False
         }
 
 

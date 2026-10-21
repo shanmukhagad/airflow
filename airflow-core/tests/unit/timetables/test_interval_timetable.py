@@ -32,6 +32,7 @@ from airflow.timetables.interval import (
     DeltaDataIntervalTimetable,
     _DataIntervalTimetable,
 )
+from airflow.utils.types import DagRunType
 
 START_DATE = pendulum.DateTime(2021, 9, 4, tzinfo=utc)
 
@@ -350,6 +351,53 @@ def test_catchup_next_info_starts_at_previous_interval_end(timetable: Timetable)
     )
     expected_end = PREV_DATA_INTERVAL_END + datetime.timedelta(hours=1)
     assert next_info == DagRunInfo.interval(start=PREV_DATA_INTERVAL_END, end=expected_end)
+
+
+def test_generate_run_id_uses_data_interval_start() -> None:
+    timetable = CronDataIntervalTimetable("@daily", utc)
+    data_interval = DataInterval(
+        start=pendulum.DateTime(2026, 9, 29, tzinfo=utc),
+        end=pendulum.DateTime(2026, 9, 30, tzinfo=utc),
+    )
+    run_after = pendulum.DateTime(2026, 9, 30, tzinfo=utc)
+
+    run_id = timetable.generate_run_id(
+        run_type=DagRunType.SCHEDULED,
+        run_after=run_after,
+        data_interval=data_interval,
+    )
+
+    assert run_id == "scheduled__2026-09-29T00:00:00+00:00"
+
+
+def test_generate_run_id_without_data_interval() -> None:
+    timetable = CronDataIntervalTimetable("@daily", utc)
+    run_after = pendulum.DateTime(2026, 9, 30, tzinfo=utc)
+
+    run_id = timetable.generate_run_id(
+        run_type=DagRunType.MANUAL,
+        run_after=run_after,
+        data_interval=None,
+    )
+
+    assert run_id == "manual__2026-09-30T00:00:00+00:00"
+
+
+def test_manual_run_id_uses_existing_logic_with_data_interval() -> None:
+    timetable = CronDataIntervalTimetable("@daily", utc)
+    data_interval = DataInterval(
+        start=pendulum.DateTime(2026, 9, 29, tzinfo=utc),
+        end=pendulum.DateTime(2026, 9, 30, tzinfo=utc),
+    )
+    run_after = pendulum.DateTime(2026, 10, 1, tzinfo=utc)
+
+    run_id = timetable.generate_run_id(
+        run_type=DagRunType.MANUAL,
+        run_after=run_after,
+        data_interval=data_interval,
+    )
+
+    assert run_id == "manual__2026-10-01T00:00:00+00:00"
 
 
 @pytest.mark.parametrize(
@@ -821,4 +869,28 @@ def test_fold_scheduling():
     assert next_info.data_interval == DataInterval(
         pendulum.datetime(2023, 10, 29, 1, 30, tz=utc),
         pendulum.datetime(2023, 10, 29, 2, 0, tz=utc),  # Locally 3am (not DST).
+    )
+
+
+def test_mid_period_deployment_no_catchup_preserves_active_interval():
+    """
+    Test that mid-period deployment with catchup=False retains active data interval
+    instead of skipping ~48 hours ahead (A2-83).
+    """
+    import pendulum
+    import time_machine
+
+    timetable = CronDataIntervalTimetable("@daily", timezone="UTC")
+    deployment_time = pendulum.datetime(2026, 10, 1, 3, 0, tz="UTC")
+    restriction = TimeRestriction(earliest=deployment_time, latest=None, catchup=False)
+
+    with time_machine.travel(deployment_time):
+        info = timetable.next_dagrun_info(
+            last_automated_data_interval=None,
+            restriction=restriction,
+        )
+
+    assert info == DagRunInfo.interval(
+        start=pendulum.datetime(2026, 10, 1, 0, 0, tz="UTC"),
+        end=pendulum.datetime(2026, 10, 2, 0, 0, tz="UTC"),
     )

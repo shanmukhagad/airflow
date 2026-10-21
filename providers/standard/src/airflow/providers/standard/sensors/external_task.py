@@ -360,7 +360,7 @@ class ExternalTaskSensor(BaseSensorOperator):
             self._handle_skipped_states(count_skipped)
 
         count = _get_count(self.allowed_states)
-        count_allowed = self._calculate_count(count, dttm_filter)        
+        count_allowed = self._calculate_count(count, dttm_filter)
         return count_allowed == len(dttm_filter)
 
     def _calculate_count(self, count: int, dttm_filter: Sequence[datetime.datetime]) -> float | int:
@@ -459,7 +459,6 @@ class ExternalTaskSensor(BaseSensorOperator):
                         skipped_states=self.skipped_states,
                         poke_interval=self.poll_interval,
                         soft_fail=self.soft_fail,
-                        check_existence=self.check_existence,
                         logical_dates=list(dttm_filter),
                         run_ids=None,
                         execution_dates=None,

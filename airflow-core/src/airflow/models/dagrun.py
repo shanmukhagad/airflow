@@ -465,8 +465,8 @@ class DagRun(Base, LoggingMixin):
     def dag_versions(self) -> list[DagVersion]:
         """Return the DAG versions associated with the TIs of this DagRun."""
         # when the dag is in a versioned bundle, we keep the dag version fixed
-        if self.bundle_version:
-            return [self.created_dag_version] if self.created_dag_version is not None else []
+        # if self.bundle_version:
+        #     return [self.created_dag_version] if self.created_dag_version is not None else []
 
         if self._prefetched_dag_version_ids is not None:
             dag_version_objects = list(self._prefetched_dag_version_ids.values())
@@ -751,8 +751,12 @@ class DagRun(Base, LoggingMixin):
                 # capacity for 1.  this could be improved.
                 coalesce(running_drs.c.num_running, text("0"))
                 < coalesce(Backfill.max_active_runs, DagModel.max_active_runs),
-                # don't set paused dag runs as running
-                not_(coalesce(cast("ColumnElement[bool]", Backfill.is_paused), False)),
+                # don't set runs of a paused backfill as running, unless the backfill has
+                # completed: a completed backfill can't be unpaused, so its pause no longer applies
+                or_(
+                    not_(coalesce(cast("ColumnElement[bool]", Backfill.is_paused), False)),
+                    Backfill.completed_at.is_not(None),
+                ),
             )
             .order_by(
                 # ordering by backfill sort ordinal first ensures that backfill dag runs

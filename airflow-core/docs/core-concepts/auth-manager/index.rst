@@ -41,6 +41,7 @@ If you want to check which auth manager is currently set, you can use the
     :hidden:
 
     simple/index
+    rbac-ref
 
 Available auth managers to use
 ------------------------------
@@ -50,6 +51,7 @@ Here is the list of auth managers available today that you can use in your Airfl
 Provided by Airflow:
 
 * :doc:`simple/index`
+* :doc:`rbac-ref`
 
 Provided by providers. The list of supported auth managers is available in :doc:`apache-airflow-providers:core-extensions/auth-managers`.
 

@@ -1387,6 +1387,24 @@ class TestPodManager:
         assert mock_sleep.call_count == 1
 
     @mock.patch("time.sleep")
+    def test_await_pod_completion_breaks_on_skip_waiting_for_sidecars(self, mock_sleep, pod_factory):
+        """When skip_waiting_for_sidecars is True, exit as soon as container completes even if pod phase is Running."""
+        running = pod_factory(pod_phase=PodPhase.RUNNING, container_name="base", terminated=True)
+
+        self.pod_manager.read_pod = mock.MagicMock(return_value=running)
+
+        result = self.pod_manager.await_pod_completion(
+            pod=mock.MagicMock(),
+            istio_enabled=False,
+            container_name="base",
+            do_xcom_push=False,
+            skip_waiting_for_sidecars=True,
+        )
+
+        assert result is running
+        assert mock_sleep.call_count == 0
+
+    @mock.patch("time.sleep")
     def test_await_pod_completion_breaks_on_early_termination_issue(self, mock_sleep, pod_factory):
         running1 = pod_factory(pod_phase=PodPhase.PENDING, container_name="base")
         running2 = pod_factory(

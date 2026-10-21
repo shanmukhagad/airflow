@@ -34,6 +34,10 @@ In your Dag file, pass a list of tags you want to add to the Dag object:
 
   dag = DAG(dag_id="example_dag_tag", schedule="0 0 * * *", tags=["example"])
 
+..note::
+
+   Each tag has a maximum length of 100 characters. If a tag exceeds this limit, 
+   a `ValueError` ` is raised identifying the offending tag and its length.
 
 **Screenshot**:
 

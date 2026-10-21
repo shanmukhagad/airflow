@@ -292,6 +292,8 @@ class AirflowConfigParser(_SharedAirflowConfigParser):
         include_descriptions: bool = True,
         extra_spacing: bool = True,
         modifications: ConfigModifications | None = None,
+        hide_sensitive_values: bool = False,
+
     ) -> None:
         """
         Write a configuration file using a ConfigModifications object.
@@ -336,9 +338,17 @@ class AirflowConfigParser(_SharedAirflowConfigParser):
                     value = modifications.default_updates[key]
 
                 default_value = self.get_default_value(effective_section, effective_option, fallback="")
+
                 is_default = str(value) == str(default_value)
+
+
+                display_value = str(value)
+                if hide_sensitive_values and (effective_section.lower(), effective_option.lower()) in self.sensitive_config_values:
+                    display_value = "***"
+
                 output.setdefault(effective_section.lower(), []).append(
-                    (effective_option, str(value), is_default, mod_comment)
+                     (effective_option, display_value, is_default, mod_comment)
+
                 )
 
         for section, options in output.items():

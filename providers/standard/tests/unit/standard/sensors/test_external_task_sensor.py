@@ -1514,7 +1514,6 @@ class TestExternalTaskSensorV3:
         with pytest.raises(ExternalDagNotFoundError):
             op.execute(context=self.context)
 
-
     @pytest.mark.execution_timeout(10)
     def test_external_task_sensor_task_group_failed_states(self, dag_maker):
         with dag_maker("test_dag_child"):

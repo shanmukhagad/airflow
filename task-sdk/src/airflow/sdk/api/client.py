@@ -35,8 +35,8 @@ from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pydantic import BaseModel, JsonValue
 from tenacity import (
+    Retrying,
     before_log,
-    retry,
     retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
@@ -598,7 +598,7 @@ class XComOperations:
             resp = self.client.get(f"xcoms/{dag_id}/{run_id}/{task_id}/{key}", params=params)
         except ServerResponseError as e:
             if e.response.status_code == HTTPStatus.NOT_FOUND:
-                log.error(
+                log.warning(
                     "XCom not found",
                     dag_id=dag_id,
                     run_id=run_id,
@@ -674,7 +674,7 @@ class XComOperations:
             resp = self.client.get(f"xcoms/{dag_id}/{run_id}/{task_id}/{key}/item/{offset}")
         except ServerResponseError as e:
             if e.response.status_code == HTTPStatus.NOT_FOUND:
-                log.error(
+                log.warning(
                     "XCom not found",
                     dag_id=dag_id,
                     run_id=run_id,
@@ -834,7 +834,7 @@ class AssetOperations:
             resp = self.client.get(endpoint, params=params)
         except ServerResponseError as e:
             if e.response.status_code == HTTPStatus.NOT_FOUND:
-                log.error(
+                log.warning(
                     "Asset not found",
                     params=params,
                     detail=e.detail,
@@ -1166,7 +1166,20 @@ class Client(httpx.Client):
             ctx.load_verify_locations(ca_path)
         return ctx
 
-    def __init__(self, *, base_url: str | None, dry_run: bool = False, token: str, **kwargs: Any):
+    def __init__(
+        self,
+        *,
+        base_url: str | None,
+        dry_run: bool = False,
+        token: str,
+        api_retries: int = API_RETRIES,
+        api_retry_wait_min: float = API_RETRY_WAIT_MIN,
+        api_retry_wait_max: float = API_RETRY_WAIT_MAX,
+        **kwargs: Any,
+    ):
+        self._api_retries = api_retries
+        self._api_retry_wait_min = api_retry_wait_min
+        self._api_retry_wait_max = api_retry_wait_max
         if (not base_url) ^ dry_run:
             raise ValueError(f"Can only specify one of {base_url=} or {dry_run=}")
         auth = BearerAuth(token)
@@ -1209,13 +1222,6 @@ class Client(httpx.Client):
             log.debug("Execution API issued us a refreshed Task token")
             self.auth = BearerAuth(new_token)
 
-    @retry(
-        retry=retry_if_exception(_should_retry_api_request),
-        stop=stop_after_attempt(API_RETRIES),
-        wait=wait_random_exponential(min=API_RETRY_WAIT_MIN, max=API_RETRY_WAIT_MAX),
-        before_sleep=_log_and_trace_retry,
-        reraise=True,
-    )
     def request(self, *args, **kwargs):
         """Implement a convenience for httpx.Client.request with a retry layer."""
         # Set content type as convenience if not already set
@@ -1224,7 +1230,17 @@ class Client(httpx.Client):
         ):
             kwargs["headers"] = {"content-type": "application/json"}
 
-        return super().request(*args, **kwargs)
+        retryer = Retrying(
+            retry=retry_if_exception(_should_retry_api_request),
+            stop=stop_after_attempt(self._api_retries),
+            wait=wait_random_exponential(
+                min=self._api_retry_wait_min,
+                max=self._api_retry_wait_max,
+            ),
+            before_sleep=_log_and_trace_retry,
+            reraise=True,
+        )
+        return retryer(super().request, *args, **kwargs)
 
     # We "group" or "namespace" operations by what they operate on, rather than a flat namespace with all
     # methods on one object prefixed with the object type (`.task_instances.update` rather than

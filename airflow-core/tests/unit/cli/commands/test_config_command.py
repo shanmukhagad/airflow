@@ -21,6 +21,7 @@ import re
 import shutil
 from unittest import mock
 
+
 import pytest
 
 from airflow.cli import cli_parser
@@ -702,3 +703,32 @@ class TestCliConfigUpdate:
         output = capsys.readouterr().out
         assert f"'{present_key}'" in output
         assert f"'{absent_key}'" not in output
+
+    @conf_vars(
+        {
+            ("database", "sql_alchemy_conn"): "postgresql://user:real_password@localhost/db",
+            ("core", "fernet_key"): "real_fernet_key=",
+        }
+    )
+    def test_config_update_dry_run_masks_secrets(self, tmp_path, monkeypatch, capsys):
+
+        cfg_file = tmp_path / "airflow.cfg"
+        cfg_file.write_text(
+            "[database]\nsql_alchemy_conn = postgresql://user:real_password@localhost/db\n"
+            "[core]\nfernet_key = real_fernet_key=\n"
+        )
+        monkeypatch.setattr(config_command, "AIRFLOW_CONFIG", str(cfg_file))
+
+        parser = cli_parser.get_parser()
+        args = parser.parse_args(["config", "update"])
+
+        config_command.update_config(args)
+
+        output = capsys.readouterr().out
+
+        assert "real_password" not in output
+        assert "real_fernet_key=" not in output
+
+        assert "sql_alchemy_conn = ***" in output
+        assert "fernet_key = ***" in output
+

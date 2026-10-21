@@ -86,10 +86,9 @@ class WorkflowTrigger(BaseTrigger):
         self.run_ids = run_ids
         self.poke_interval = poke_interval
         self.soft_fail = soft_fail
+        self.check_existence = check_existence
         self.execution_dates = execution_dates
         self.logical_dates = logical_dates
-        self.check_existence = check_existence
-
         super().__init__(**kwargs)
 
     def serialize(self) -> tuple[str, dict[str, Any]]:
@@ -103,7 +102,6 @@ class WorkflowTrigger(BaseTrigger):
             "allowed_states": self.allowed_states,
             "poke_interval": self.poke_interval,
             "soft_fail": self.soft_fail,
-            "check_existence": self.check_existence,
         }
         if AIRFLOW_V_3_0_PLUS:
             data["run_ids"] = self.run_ids

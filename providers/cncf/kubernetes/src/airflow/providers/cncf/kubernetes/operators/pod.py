@@ -262,6 +262,8 @@ class KubernetesPodOperator(BaseOperator):
     :param log_formatter: custom log formatter function that takes two string arguments:
         the first string is the container_name and the second string is the message_to_log.
         The function should return a formatted string. If None, the default formatting will be used.
+    :param skip_waiting_for_sidecars: If True, the operator will not wait for long-running
+        sidecar containers to complete after the base container has finished execution.
     """
 
     # !!! Changes in KubernetesPodOperator's arguments should be also reflected in !!!
@@ -375,11 +377,13 @@ class KubernetesPodOperator(BaseOperator):
         trigger_kwargs: dict | None = None,
         container_name_log_prefix_enabled: bool = True,
         log_formatter: Callable[[str, str], str] | None = None,
+        skip_waiting_for_sidecars: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.kubernetes_conn_id = kubernetes_conn_id
         self.do_xcom_push = do_xcom_push
+        self.skip_waiting_for_sidecars = skip_waiting_for_sidecars
         self.image = image
         self.namespace = namespace
         self.cmds = cmds or []
@@ -764,8 +768,13 @@ class KubernetesPodOperator(BaseOperator):
                 result = self.extract_xcom(pod=self.pod)
             istio_enabled = self.is_istio_enabled(self.pod)
             self.remote_pod = self.pod_manager.await_pod_completion(
-                self.pod, istio_enabled, self.base_container_name, self.do_xcom_push
+                self.pod,
+                istio_enabled,
+                self.base_container_name,
+                self.do_xcom_push,
+                skip_waiting_for_sidecars=self.skip_waiting_for_sidecars,
             )
+
         finally:
             pod_to_clean = self.pod or self.pod_request_obj
             self.post_complete_action(
@@ -1237,7 +1246,7 @@ class KubernetesPodOperator(BaseOperator):
         if pod_phase != PodPhase.SUCCEEDED or should_keep:
             self.patch_already_checked(remote_pod, reraise=False)
 
-        if istio_enabled or self.do_xcom_push:
+        if istio_enabled or self.do_xcom_push or self.skip_waiting_for_sidecars:
             failed = not container_is_succeeded(remote_pod, self.base_container_name)
         else:
             failed = pod_phase != PodPhase.SUCCEEDED

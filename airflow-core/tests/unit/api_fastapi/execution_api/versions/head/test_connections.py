@@ -128,3 +128,26 @@ class TestGetConnection:
                 "message": "Task does not have access to connection test_conn",
             }
         }
+
+    def test_get_connection_with_slash(self, client, session):
+            """Test that connection IDs containing forward slashes resolve via the execution API."""
+            conn_id = "test_conn/with/slash"
+            connection = Connection(
+                conn_id=conn_id,
+                conn_type="http",
+                host="https://api.example.com",
+            )
+
+            session.add(connection)
+            session.commit()
+
+            response = client.get(f"/execution/connections/{conn_id}")
+
+            assert response.status_code == 200
+            assert response.json()["conn_id"] == conn_id
+            assert response.json()["conn_type"] == "http"
+            assert response.json()["host"] == "https://api.example.com"
+
+            # Cleanup connection
+            session.delete(connection)
+            session.commit()

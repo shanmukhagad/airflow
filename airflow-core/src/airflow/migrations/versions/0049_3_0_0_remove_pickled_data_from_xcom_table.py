@@ -207,6 +207,74 @@ def _xcom_sqlite_sanitize_statements(table: str = "xcom", json1: bool = True) ->
     ]
 
 
+def _archive_unconvertible_xcom_values(conn, quoted_key: str) -> None:
+    """Archive XCom values that cannot be converted to PostgreSQL JSONB.
+
+    PostgreSQL JSONB has implementation limits (e.g., max string length of 268435455 bytes
+    for array/object elements). Values that exceed these limits cannot be converted.
+    Rather than fail the entire migration, this function archives such rows to
+    _xcom_archive and removes them from xcom.
+
+    The detection is done by attempting the actual JSONB cast in a pg_temp function,
+    as size limits are not the only possible cause of conversion failure.
+    """
+    # Create a temporary function that attempts JSONB conversion and returns success/failure
+    conn.execute(
+        text("""
+            CREATE OR REPLACE FUNCTION pg_temp._airflow_xcom_can_convert_to_jsonb(data bytea)
+            RETURNS boolean AS $$
+            BEGIN
+                PERFORM convert_from(data, 'UTF8')::JSONB;
+                RETURN true;
+            EXCEPTION WHEN OTHERS THEN
+                RETURN false;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+    )
+
+    # Find rows that cannot be converted (excluding pickled data which is already handled)
+    # Use octet_length as a cheap pre-filter for performance, but the actual check is the cast probe
+    # unconvertible_rows = conn.execute(
+    #     text(f"""
+    #         SELECT dag_run_id, task_id, map_index, {quoted_key}, dag_id, run_id, value, timestamp
+    #         FROM xcom
+    #         WHERE value IS NOT NULL
+    #             AND get_byte(value, 0) != 128
+    #             AND octet_length(value) > 268435455
+    #             AND NOT pg_temp._airflow_xcom_can_convert_to_jsonb(value)
+    #     """)
+    # ).fetchall()
+
+    # if not unconvertible_rows:
+    #     return
+
+        # Archive unconvertible rows directly in PostgreSQL so large XCom values
+    # are not loaded into Python memory.
+    conn.execute(
+        text(f"""
+            INSERT INTO _xcom_archive
+            (dag_run_id, task_id, map_index, {quoted_key}, dag_id, run_id, value, timestamp)
+            SELECT dag_run_id, task_id, map_index, {quoted_key}, dag_id, run_id, value, timestamp
+            FROM xcom
+            WHERE value IS NOT NULL
+                AND get_byte(value, 0) != 128
+                AND octet_length(value) > 268435455
+                AND NOT pg_temp._airflow_xcom_can_convert_to_jsonb(value)
+        """)
+    )
+
+    # Delete the same rows from xcom.
+    conn.execute(
+        text(f"""
+            DELETE FROM xcom
+            WHERE value IS NOT NULL
+                AND get_byte(value, 0) != 128
+                AND octet_length(value) > 268435455
+                AND NOT pg_temp._airflow_xcom_can_convert_to_jsonb(value)
+        """)
+    )
+
 def _sqlite_has_json1(conn) -> bool:
     """Whether this SQLite build provides json_valid() (the JSON1 extension)."""
     try:
@@ -292,6 +360,8 @@ def upgrade():
     # Sanitize values that are legal in the pickled blob but illegal in strict JSON/JSONB
     # before changing the column type. See the statements at the top of this module.
     if dialect == "postgresql":
+        _archive_unconvertible_xcom_values(conn, quoted_key)
+        
         for stmt in _xcom_pg_sanitize_statements():
             conn.execute(text(stmt))
 

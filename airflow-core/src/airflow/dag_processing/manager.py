@@ -1419,7 +1419,41 @@ class DagFileProcessorManager(LoggingMixin):
     def client(self) -> Client:
         from airflow.sdk.api.client import Client
 
-        client = Client(base_url=None, token="", dry_run=True, transport=self._api_server.transport)
+        retry_keys = (
+            "execution_api_retries",
+            "execution_api_retry_wait_min",
+            "execution_api_retry_wait_max",
+        )
+
+        retry_values = {key: conf.get("dag_processor", key, fallback=None) for key in retry_keys}
+
+        api_retries = int(
+            retry_values["execution_api_retries"]
+            if retry_values["execution_api_retries"] is not None
+            else conf.getint("workers", "execution_api_retries")
+        )
+
+        api_retry_wait_min = float(
+            retry_values["execution_api_retry_wait_min"]
+            if retry_values["execution_api_retry_wait_min"] is not None
+            else conf.getfloat("workers", "execution_api_retry_wait_min")
+        )
+
+        api_retry_wait_max = float(
+            retry_values["execution_api_retry_wait_max"]
+            if retry_values["execution_api_retry_wait_max"] is not None
+            else conf.getfloat("workers", "execution_api_retry_wait_max")
+        )
+
+        client = Client(
+            base_url=None,
+            token="",
+            dry_run=True,
+            transport=self._api_server.transport,
+            api_retries=api_retries,
+            api_retry_wait_min=api_retry_wait_min,
+            api_retry_wait_max=api_retry_wait_max,
+        )
         # Mypy is wrong -- the setter accepts a string on the property setter! `URLType = URL | str`
         client.base_url = "http://in-process.invalid./"
         return client

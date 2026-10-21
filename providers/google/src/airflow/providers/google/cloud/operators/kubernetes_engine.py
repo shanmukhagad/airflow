@@ -796,6 +796,8 @@ class GKEStartPodOperator(GKEOperatorMixin, KubernetesPodOperator):
     ) -> None:
         """Redefine triggers which are being used in child classes."""
         trigger_start_time = timezone.utcnow()
+        # 1. # fix-71514 Calculate the timeout deadline
+        trigger_timeout = trigger_start_time + self.execution_timeout if self.execution_timeout else None
         on_finish_action = self.on_finish_action
         if type(on_finish_action) is str and self.on_finish_action not in [i.value for i in OnFinishAction]:
             on_finish_action = self.on_finish_action.split(".")[-1].lower()  # type: ignore[assignment]
@@ -819,6 +821,7 @@ class GKEStartPodOperator(GKEOperatorMixin, KubernetesPodOperator):
                 logging_interval=self.logging_interval,
                 last_log_time=last_log_time,
                 use_dns_endpoint=self.use_dns_endpoint,
+                timeout=trigger_timeout, # 2. # fix-71514 Pass the timeout into the trigger
             ),
             method_name="trigger_reentry",
         )
