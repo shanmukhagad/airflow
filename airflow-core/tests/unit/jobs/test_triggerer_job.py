@@ -402,6 +402,73 @@ def test_client_delegates_to_make_client_and_caches_result(supervisor_builder, m
     make_client.assert_called_once_with(supervisor)
 
 
+def test_make_client_uses_triggerer_retry_settings(supervisor_builder, mocker):
+    """The Triggerer uses its own retry settings when explicitly configured."""
+    from airflow.jobs import triggerer_job_runner
+
+    supervisor = supervisor_builder()
+
+    mock_server = mocker.Mock()
+    mock_server.transport = mocker.sentinel.transport
+    mocker.patch.object(triggerer_job_runner, "in_process_api_server", return_value=mock_server)
+
+    values = {
+        ("triggerer", "execution_api_retries"): "7",
+        ("triggerer", "execution_api_retry_wait_min"): "2.0",
+        ("triggerer", "execution_api_retry_wait_max"): "10.0",
+    }
+
+    def get_config(section, key, fallback=None):
+        return values.get((section, key), fallback)
+
+    mocker.patch.object(triggerer_job_runner.conf, "get", side_effect=get_config)
+    mocker.patch.object(triggerer_job_runner.conf, "getint", return_value=3)
+    mocker.patch.object(triggerer_job_runner.conf, "getfloat", return_value=1.0)
+
+    client_class = mocker.patch("airflow.sdk.api.client.Client", autospec=True)
+
+    supervisor.make_client()
+
+    client_class.assert_called_once_with(
+        base_url=None,
+        token="",
+        dry_run=True,
+        transport=mocker.sentinel.transport,
+        api_retries=7,
+        api_retry_wait_min=2.0,
+        api_retry_wait_max=10.0,
+    )
+
+
+def test_make_client_falls_back_to_worker_retry_settings(supervisor_builder, mocker):
+    """The Triggerer uses worker retry settings when its own are unset."""
+    from airflow.jobs import triggerer_job_runner
+
+    supervisor = supervisor_builder()
+
+    mock_server = mocker.Mock()
+    mock_server.transport = mocker.sentinel.transport
+    mocker.patch.object(triggerer_job_runner, "in_process_api_server", return_value=mock_server)
+
+    mocker.patch.object(triggerer_job_runner.conf, "get", return_value=None)
+    mocker.patch.object(triggerer_job_runner.conf, "getint", return_value=4)
+    mocker.patch.object(triggerer_job_runner.conf, "getfloat", side_effect=[1.5, 8.0])
+
+    client_class = mocker.patch("airflow.sdk.api.client.Client", autospec=True)
+
+    supervisor.make_client()
+
+    client_class.assert_called_once_with(
+        base_url=None,
+        token="",
+        dry_run=True,
+        transport=mocker.sentinel.transport,
+        api_retries=4,
+        api_retry_wait_min=1.5,
+        api_retry_wait_max=8.0,
+    )
+
+
 def test_run_context_exits_when_subprocess_dies(supervisor_builder, mocker):
     """Breaking out of the loop on a dead subprocess still unwinds run_context."""
     from contextlib import contextmanager

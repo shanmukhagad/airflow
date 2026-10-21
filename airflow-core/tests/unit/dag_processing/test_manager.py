@@ -218,6 +218,81 @@ class TestDagFileProcessorManager:
         clear_db_import_errors()
         clear_db_dag_bundles()
 
+    def test_client_uses_dag_processor_retry_settings(self, mocker):
+        """The Dag Processor uses its own retry settings when configured."""
+        from airflow.dag_processing import manager as manager_module
+
+        dag_processor = DagFileProcessorManager(max_runs=1)
+
+        values = {
+            ("dag_processor", "execution_api_retries"): "7",
+            ("dag_processor", "execution_api_retry_wait_min"): "2.0",
+            ("dag_processor", "execution_api_retry_wait_max"): "10.0",
+        }
+
+        def get_config(section, key, fallback=None, **kwargs):
+            return values.get((section, key), fallback)
+
+        original_get = manager_module.conf.get
+        original_getint = manager_module.conf.getint
+        original_getfloat = manager_module.conf.getfloat
+
+        try:
+            mocker.patch.object(manager_module.conf, "get", side_effect=get_config)
+            mocker.patch.object(manager_module.conf, "getint", return_value=3)
+            mocker.patch.object(manager_module.conf, "getfloat", return_value=1.0)
+            client_class = mocker.patch("airflow.sdk.api.client.Client", autospec=True)
+
+            dag_processor.client
+
+            client_class.assert_called_once_with(
+                base_url=None,
+                token="",
+                dry_run=True,
+                transport=dag_processor._api_server.transport,
+                api_retries=7,
+                api_retry_wait_min=2.0,
+                api_retry_wait_max=10.0,
+            )
+        finally:
+            mocker.stopall()
+            manager_module.conf.get = original_get
+            manager_module.conf.getint = original_getint
+            manager_module.conf.getfloat = original_getfloat
+
+    def test_client_falls_back_to_worker_retry_settings(self, mocker):
+        """The Dag Processor uses worker retry settings when its own are unset."""
+        from airflow.dag_processing import manager as manager_module
+
+        dag_processor = DagFileProcessorManager(max_runs=1)
+
+        original_get = manager_module.conf.get
+        original_getint = manager_module.conf.getint
+        original_getfloat = manager_module.conf.getfloat
+
+        try:
+            mocker.patch.object(manager_module.conf, "get", return_value=None)
+            mocker.patch.object(manager_module.conf, "getint", return_value=4)
+            mocker.patch.object(manager_module.conf, "getfloat", side_effect=[1.5, 8.0])
+            client_class = mocker.patch("airflow.sdk.api.client.Client", autospec=True)
+
+            dag_processor.client
+
+            client_class.assert_called_once_with(
+                base_url=None,
+                token="",
+                dry_run=True,
+                transport=dag_processor._api_server.transport,
+                api_retries=4,
+                api_retry_wait_min=1.5,
+                api_retry_wait_max=8.0,
+            )
+        finally:
+            mocker.stopall()
+            manager_module.conf.get = original_get
+            manager_module.conf.getint = original_getint
+            manager_module.conf.getfloat = original_getfloat
+
     def mock_processor(self, start_time: float | None = None) -> tuple[DagFileProcessorProcess, socket]:
         proc = MagicMock()
         logger_filehandle = MagicMock()
