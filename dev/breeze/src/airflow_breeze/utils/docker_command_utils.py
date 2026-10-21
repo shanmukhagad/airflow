@@ -292,10 +292,9 @@ def check_container_engine_is_docker(quiet: bool = False) -> bool:
     )
     if podman_engine_enabled:
         console_print(
-            "[warning]Podman container engine detected.[/]\n"
-            "[warning]Podman container engine has not become fully supported in breeze yet.[/]"
+            "[success]Podman container engine detected.[/]"
         )
-        return False
+        return True
     console_print("[success]Docker container engine detected.[/]")
     return True
 
