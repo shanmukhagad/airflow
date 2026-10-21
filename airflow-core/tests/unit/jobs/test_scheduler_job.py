@@ -336,6 +336,48 @@ class TestSchedulerJob:
         yield
         self.null_exec = None
 
+    def test_dagrun_timeout_triggers_on_kill(self, dag_maker, session):
+        """Test that when a DAG run times out, call_on_kill_on_dagrun_timeout triggers on_kill for tasks."""
+        with dag_maker(
+            dag_id="test_dagrun_timeout_on_kill",
+            dagrun_timeout=datetime.timedelta(seconds=1),
+            call_on_kill_on_dagrun_timeout=True,
+            session=session,
+        ):
+            task = BashOperator(
+                task_id="task1",
+                bash_command="sleep 10",
+            )
+
+        dr = dag_maker.create_dagrun(
+            state=DagRunState.RUNNING,
+            start_date=timezone.utcnow() - datetime.timedelta(seconds=10),
+            session=session,
+        )
+        
+        # Ensure dr is bound to session and flushed
+        dr = session.merge(dr)
+        
+        ti = dr.get_task_instance(task.task_id, session=session)
+        ti.state = TaskInstanceState.RUNNING
+        session.merge(ti)
+        session.commit()
+
+        scheduler_job = Job()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job)
+        self.job_runner.executor = MockExecutor()
+
+        # Run scheduler step
+        self.job_runner._schedule_dag_run(dr, session)
+        session.commit()
+
+        # Re-fetch updated objects from session
+        dr_updated = session.get(DagRun, dr.id)
+        assert dr_updated.state == DagRunState.FAILED
+
+        ti_updated = session.get(TaskInstance, ti.id)
+        assert ti_updated.state == TaskInstanceState.FAILED
+
     @pytest.fixture
     def team_bundle(self, testing_team, testing_dag_bundle, session):
         team = session.merge(testing_team)

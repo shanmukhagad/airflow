@@ -510,6 +510,11 @@ class DAG:
             )
         ),
     )
+    call_on_kill_on_dagrun_timeout: bool = attrs.field(
+        default=True,
+        kw_only=True,
+        validator=attrs.validators.instance_of(bool),
+    )
 
     sla_miss_callback: None = attrs.field(default=None)
     catchup: bool = attrs.field(
