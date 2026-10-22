@@ -22,6 +22,7 @@ from airflow.providers.amazon.aws.triggers.sqs import SqsSensorTrigger
 
 pytest.importorskip("airflow.providers.common.messaging.providers.base_provider")
 
+
 def test_message_sqs_queue_create():
     from airflow.providers.amazon.aws.queues.sqs import SqsMessageQueueProvider
     from airflow.providers.common.messaging.providers.base_provider import BaseMessageQueueProvider
