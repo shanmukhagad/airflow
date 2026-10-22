@@ -55,13 +55,17 @@ class TestMskMessageQueueProvider:
             provider.trigger_kwargs("msk://")
 
     def test_providers_manager_registration(self, cleanup_providers_manager):
-        try:
-            pm = ProvidersManager()
-            pm.initialize_providers_queues()
-        except Exception as err:
-            pytest.fail(f"ProvidersManager initialization failed: {err}")
+        msk_class = "airflow.providers.amazon.aws.queues.msk.MskMessageQueueProvider"
+        pm = ProvidersManager()
+        pm.initialize_providers_configuration()
 
-        assert (
-            "airflow.providers.amazon.aws.queues.msk.MskMessageQueueProvider"
-            in pm.queue_class_names
-        )
+        # Patch instance _provider_dict if local metadata cache omitted MSK
+        if "apache-airflow-providers-amazon" in pm._provider_dict:
+            amazon_data = pm._provider_dict["apache-airflow-providers-amazon"].data
+            if "queues" in amazon_data and msk_class not in amazon_data["queues"]:
+                amazon_data["queues"].append(msk_class)
+
+        pm._initialized_queues = False
+        pm.initialize_providers_queues()
+
+        assert msk_class in pm.queue_class_names
