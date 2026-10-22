@@ -33,6 +33,7 @@ from airflow_breeze.params.build_prod_params import BuildProdParams
 from airflow_breeze.utils.docker_command_utils import (
     autodetect_docker_context,
     bring_all_compose_projects_down,
+    check_container_engine_is_docker,
     check_docker_compose_version,
     check_docker_is_running,
     check_docker_permission_denied,
@@ -639,3 +640,25 @@ def test_prepare_docker_build_command_does_not_add_sources_hash_label_to_prod_im
     mock_check_if_buildx_plugin_installed.return_value = False
     command = prepare_docker_build_command(BuildProdParams())
     assert not any(flag.startswith(CI_IMAGE_SOURCES_HASH_LABEL) for flag in command)
+
+
+@mock.patch("airflow_breeze.utils.docker_command_utils.run_command")
+def test_check_container_engine_is_docker_success(mock_run_command):
+    mock_run_command.return_value.returncode = 0
+    mock_run_command.return_value.stdout = "Client: Docker Engine - Community\n Version: 25.0.3"
+    assert check_container_engine_is_docker() is True
+
+
+@mock.patch("airflow_breeze.utils.docker_command_utils.run_command")
+def test_check_container_engine_is_podman_success(mock_run_command):
+    mock_run_command.return_value.returncode = 0
+    mock_run_command.return_value.stdout = "Client: Podman Engine\n Version: 4.9.3"
+    assert check_container_engine_is_docker() is True
+
+
+@mock.patch("airflow_breeze.utils.docker_command_utils.run_command")
+def test_check_container_engine_failure(mock_run_command):
+    mock_run_command.return_value.returncode = 1
+    with pytest.raises(SystemExit) as exc_info:
+        check_container_engine_is_docker()
+    assert exc_info.value.code == 1
