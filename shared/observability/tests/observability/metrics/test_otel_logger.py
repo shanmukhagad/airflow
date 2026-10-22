@@ -327,7 +327,6 @@ class TestOtelMetrics:
         state["value"] = 5
         assert read_values() == [5]
 
-
     def test_timing_new_metric(self, name):
         import datetime
 

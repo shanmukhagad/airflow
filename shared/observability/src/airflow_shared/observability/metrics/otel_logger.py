@@ -305,8 +305,10 @@ class SafeOtelLogger:
         :param tags: Tags to append to the stat.
         """
         if self._is_recordable(stat):
-            self.metrics_map.register_observable_gauge(full_name(prefix=self.prefix, name=stat), callback, tags)
-    
+            self.metrics_map.register_observable_gauge(
+                full_name(prefix=self.prefix, name=stat), callback, tags
+            )
+
     def timing(
         self,
         stat: str,

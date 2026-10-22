@@ -21,6 +21,7 @@ import datetime
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
 from .base_stats_logger import read_gauge_callback
 
 from .protocols import Timer
@@ -131,7 +132,7 @@ class SafeDogStatsdLogger:
         value = read_gauge_callback(stat, callback)
         if value is not None:
             self.gauge(stat, value, tags=tags)
-        
+
     @validate_stat
     def timing(
         self,

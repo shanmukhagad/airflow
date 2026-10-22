@@ -16,6 +16,7 @@
 # under the License.
 
 from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
@@ -42,6 +43,7 @@ def read_gauge_callback(stat: str, callback: Callable[[], int | float]) -> int |
     except Exception:
         log.exception("Observable gauge callback for '%s' failed.", stat)
         return None
+
 
 class StatsLogger(Protocol):
     """This class is only used for TypeChecking (for IDEs, mypy, etc)."""
@@ -105,8 +107,8 @@ class StatsLogger(Protocol):
         callback: Callable[[], int | float],
         *,
         tags: dict[str, Any] | None = None,
-   ) -> None:
-       """Observable gauge stat."""
+    ) -> None:
+        """Observable gauge stat."""
 
     @classmethod
     def timer(cls, *args, **kwargs) -> Timer:
@@ -150,8 +152,10 @@ class NoStatsLogger:
         """Stats timing."""
 
     @classmethod
-    def observable_gauge( cls, stat: str, callback: Callable[[], int | float], *, tags: dict[str, str] | None = None) -> None:
-           """Observable gauge stat."""
+    def observable_gauge(
+        cls, stat: str, callback: Callable[[], int | float], *, tags: dict[str, str] | None = None
+    ) -> None:
+        """Observable gauge stat."""
 
     @classmethod
     def timer(cls, *args, **kwargs) -> Timer:

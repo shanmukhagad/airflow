@@ -21,6 +21,7 @@ import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import TYPE_CHECKING, TypeVar, cast
+
 from .base_stats_logger import read_gauge_callback
 
 from .protocols import Timer
@@ -126,7 +127,6 @@ class SafeStatsdLogger:
         if self.metrics_validator.test(stat):
             return self.statsd.gauge(stat, value, rate, delta)
         return None
-
 
     def observable_gauge(
         self,

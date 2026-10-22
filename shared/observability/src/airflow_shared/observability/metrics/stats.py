@@ -230,6 +230,7 @@ def gauge(
         backend.gauge(legacy_name, value, **_defined(rate=rate, delta=delta, tags=extra_tags))
     backend.gauge(stat, value, **_defined(rate=rate, delta=delta, tags=tags))
 
+
 def observable_gauge(
     stat: str,
     callback: Callable[[], int | float],

@@ -272,7 +272,7 @@ class TestDogStats:
     def test_observable_gauge_callback_error_is_logged(self, caplog):
         def broken():
             raise ValueError("boom")
-        
+
         self.dogstatsd.observable_gauge("empty", broken)
         self.dogstatsd_client.gauge.assert_not_called()
         assert "empty" in caplog.text
