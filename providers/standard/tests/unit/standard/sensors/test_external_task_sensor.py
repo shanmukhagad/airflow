@@ -85,6 +85,7 @@ def _make_dagbag(dag_folder):
 if AIRFLOW_V_3_0_PLUS:
     from airflow.models.dag_version import DagVersion
     from airflow.sdk import BaseOperator, task as task_deco
+    from airflow.sdk.execution_time import macros
     from airflow.utils.types import DagRunTriggeredByType
 else:
     from airflow.decorators import task as task_deco  # type: ignore[attr-defined,no-redef]
@@ -689,7 +690,7 @@ exit 0
         # Test that providing execution_delta and a function raises an error
         with pytest.raises(
             ValueError,
-            match="Only one of `execution_delta` or `execution_date_fn` may be provided to ExternalTaskSensor; not both.",
+            match="Only one of `logical_date`, `execution_delta` or `execution_date_fn` may be provided to ExternalTaskSensor.",
         ):
             ExternalTaskSensor(
                 task_id="test_external_task_sensor_check_delta",
@@ -1412,6 +1413,104 @@ class TestExternalTaskSensorV3:
             task_ids=["test_task"],
         )
         assert op.external_dates_filter == expected_date.isoformat()
+
+    @pytest.mark.execution_timeout(10)
+    @pytest.mark.parametrize(
+        ("logical_date", "expected_dates"),
+        [
+            pytest.param(
+                "{{ logical_date - macros.timedelta(hours=1) }}",
+                [DEFAULT_DATE - timedelta(hours=1)],
+                id="template",
+            ),
+            pytest.param("2015-01-02T00:00:00+00:00", [DEFAULT_DATE + timedelta(days=1)], id="iso-string"),
+            pytest.param(DEFAULT_DATE + timedelta(days=2), [DEFAULT_DATE + timedelta(days=2)], id="datetime"),
+            pytest.param(
+                ["{{ logical_date }}", "{{ logical_date + macros.timedelta(days=1) }}"],
+                [DEFAULT_DATE, DEFAULT_DATE + timedelta(days=1)],
+                id="list-of-templates",
+            ),
+        ],
+    )
+    def test_external_task_sensor_logical_date(self, dag_maker, logical_date, expected_dates):
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id="test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="test_task",
+                logical_date=logical_date,
+                allowed_states=["success"],
+            )
+
+        self.context["macros"] = macros
+        op.render_template_fields(self.context)
+        self.context["ti"].get_ti_count.return_value = len(expected_dates)
+        op.execute(context=self.context)
+
+        self.context["ti"].get_ti_count.assert_called_once_with(
+            dag_id="test_dag_parent",
+            logical_dates=expected_dates,
+            states=["success"],
+            task_ids=["test_task"],
+        )
+        assert op.external_dates_filter == ",".join(dt.isoformat() for dt in expected_dates)
+
+    @pytest.mark.parametrize("logical_date", [123, [], [DEFAULT_DATE, 123]])
+    def test_external_task_sensor_logical_date_invalid_type(self, dag_maker, logical_date):
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id="test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="test_task",
+                logical_date=logical_date,
+            )
+
+        with pytest.raises(TypeError, match="for `logical_date`"):
+            op.execute(context=self.context)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"logical_date": "{{ logical_date }}", "execution_delta": timedelta(hours=1)},
+            {"logical_date": "{{ logical_date }}", "execution_date_fn": lambda dt: dt},
+            {"execution_delta": timedelta(hours=1), "execution_date_fn": lambda dt: dt},
+            {
+                "logical_date": "{{ logical_date }}",
+                "execution_delta": timedelta(hours=1),
+                "execution_date_fn": lambda dt: dt,
+            },
+        ],
+    )
+    def test_external_task_sensor_date_args_mutually_exclusive(self, dag_maker, kwargs):
+        with pytest.raises(
+            ValueError,
+            match="Only one of `logical_date`, `execution_delta` or `execution_date_fn` may be provided",
+        ):
+            with dag_maker("test_dag_child"):
+                ExternalTaskSensor(
+                    task_id="test_external_task_sensor_check",
+                    external_dag_id="test_dag_parent",
+                    external_task_id="test_task",
+                    **kwargs,
+                )
+
+    @pytest.mark.execution_timeout(10)
+    def test_external_task_sensor_deferrable_logical_date(self, dag_maker):
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id="test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="test_task",
+                logical_date="{{ logical_date - macros.timedelta(days=1) }}",
+                deferrable=True,
+            )
+
+        self.context["macros"] = macros
+        op.render_template_fields(self.context)
+        with pytest.raises(TaskDeferred) as exc:
+            op.execute(context=self.context)
+
+        assert exc.value.trigger.logical_dates == [DEFAULT_DATE - timedelta(days=1)]
 
     @pytest.mark.execution_timeout(10)
     def test_external_task_sensor_duplicate_task_ids(self, dag_maker):
