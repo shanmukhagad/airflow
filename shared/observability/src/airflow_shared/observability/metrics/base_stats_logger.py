@@ -16,7 +16,7 @@
 # under the License.
 
 from __future__ import annotations
-
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -25,6 +25,23 @@ from .protocols import Timer
 if TYPE_CHECKING:
     from .protocols import DeltaType
 
+log = logging.getLogger(__name__)
+
+
+def read_gauge_callback(stat: str, callback: Callable[[], int | float]) -> int | float | None:
+    """
+    Return the value from a gauge callback, or None if the callback fails.
+
+    The error is logged and not raised, so a broken callback never crashes the caller.
+
+    :param stat: The name of the stat, used in the log message.
+    :param callback: Function with no arguments that returns the current value.
+    """
+    try:
+        return callback()
+    except Exception:
+        log.exception("Observable gauge callback for '%s' failed.", stat)
+        return None
 
 class StatsLogger(Protocol):
     """This class is only used for TypeChecking (for IDEs, mypy, etc)."""

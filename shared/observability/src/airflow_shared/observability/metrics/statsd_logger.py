@@ -21,6 +21,7 @@ import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import TYPE_CHECKING, TypeVar, cast
+from .base_stats_logger import read_gauge_callback
 
 from .protocols import Timer
 from .validators import (
@@ -135,12 +136,10 @@ class SafeStatsdLogger:
         tags: dict[str, str] | None = None,
     ) -> None:
         """Read the callback and send its value as a gauge, StatsD cannot poll on its own."""
-        try:
-            value = callback()
-        except Exception:
-            log.exception("Observable gauge callback for '%s' failed.", stat)
-            return
-        self.gauge(stat, value, tags=tags)
+
+        value = read_gauge_callback(stat, callback)
+        if value is not None:
+            self.gauge(stat, value, tags=tags)
 
     @prepare_stat_with_tags
     @validate_stat
