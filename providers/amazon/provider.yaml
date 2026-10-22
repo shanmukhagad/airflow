@@ -21,6 +21,10 @@ name: Amazon
 description: |
   Amazon integration (including `Amazon Web Services (AWS) <https://aws.amazon.com/>`__).
 
+queues:
+  - airflow.providers.amazon.aws.queues.sqs.SqsMessageQueueProvider
+  - airflow.providers.amazon.aws.queues.msk.MskMessageQueueProvider
+  
 state: ready
 lifecycle: production
 source-date-epoch: 1781642052
@@ -1477,5 +1481,3 @@ auth-managers:
 cli:
   - airflow.providers.amazon.aws.cli.definition.get_aws_cli_commands
 
-queues:
-  - airflow.providers.amazon.aws.queues.sqs.SqsMessageQueueProvider

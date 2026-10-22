@@ -1,66 +1,91 @@
 from __future__ import annotations
 
-import pytest
+import os
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlparse
 
-pytest.importorskip("airflow.providers.common.messaging.providers.base_provider")
+try:
+    from airflow.providers.common.messaging.providers.base_provider import BaseMessageQueueProvider
+except ImportError:
+    from airflow.exceptions import AirflowOptionalProviderFeatureException
 
-from airflow.providers.amazon.aws.queues.msk import MskMessageQueueProvider
-from airflow.providers_manager import ProvidersManager
+    raise AirflowOptionalProviderFeatureException(
+        "The 'common.messaging' provider version >= 2.0.0 is required to use message queue providers. "
+        "Install it with: pip install 'apache-airflow-providers-amazon[common.messaging]'"
+    )
 
-class TestMskMessageQueueProvider:
-    def test_scheme_and_matching(self):
-        provider = MskMessageQueueProvider()
-        assert provider.scheme == "msk"
-        assert provider.queue_matches("msk://my-topic")
-        assert provider.queue_matches("msk://b-1.msk.aws:9098/my-topic")
-        assert not provider.queue_matches("kinesis://my-stream")
+if TYPE_CHECKING:
+    from airflow.triggers.base import BaseTrigger
 
-    def test_trigger_class(self):
-        provider = MskMessageQueueProvider()
+
+class MskMessageQueueProvider(BaseMessageQueueProvider):
+    """Message Queue Provider adapter for Amazon Managed Streaming for Apache Kafka (MSK)."""
+
+    scheme = "msk"
+
+    def queue_matches(self, queue_name: str) -> bool:
+        """Return True if the given queue name or URI matches this provider's scheme."""
+        return queue_name.startswith(f"{self.scheme}://") or self.scheme_matches(queue_name)
+
+    def trigger_class(self) -> type[BaseTrigger]:
+        """Return the underlying trigger class responsible for executing event watching."""
         try:
-            trigger_cls = provider.trigger_class()
-            assert trigger_cls.__name__ == "AwaitMessageTrigger"
-        except Exception as err:
-            pytest.fail(f"Failed to resolve trigger class: {err}")
+            from airflow.providers.apache.kafka.triggers.await_message import AwaitMessageTrigger
 
-    def test_trigger_kwargs_uri_parsing(self):
-        provider = MskMessageQueueProvider()
-        try:
-            kwargs = provider.trigger_kwargs(
-                "msk://b-1.msk.us-east-1.amazonaws.com:9098/topic-a,topic-b?kafka_config_id=msk_conn"
+            return AwaitMessageTrigger
+        except ImportError as e:
+            from airflow.exceptions import AirflowOptionalProviderFeatureException
+
+            raise AirflowOptionalProviderFeatureException(
+                "The 'apache-kafka' provider is required to use the Amazon MSK queue provider. "
+                "Install it with: pip install 'apache-airflow-providers-apache-kafka[msk]'"
+            ) from e
+
+    def trigger_kwargs(self, queue_name: str, **kwargs: Any) -> dict[str, Any]:
+        """Parse queue URIs and keyword arguments into trigger arguments."""
+        topics = kwargs.pop("topics", None)
+        bootstrap_servers = kwargs.pop("bootstrap_servers", None)
+        conn_id = kwargs.pop("kafka_config_id", None)
+        uri_kwargs: dict[str, Any] = {}
+
+        if queue_name.startswith(f"{self.scheme}://"):
+            try:
+                parsed = urlparse(queue_name)
+                if parsed.netloc and not bootstrap_servers:
+                    bootstrap_servers = parsed.netloc
+
+                path_clean = parsed.path.strip("/")
+                if path_clean and not topics:
+                    topics = [t for t in path_clean.split(",") if t]
+
+                if parsed.query:
+                    for k, v in parse_qs(parsed.query).items():
+                        if v:
+                            uri_kwargs[k] = v[0] if len(v) == 1 else v
+            except Exception as err:
+                raise ValueError(f"Invalid MSK queue URI '{queue_name}': {err}") from err
+
+        if not topics:
+            raise ValueError(
+                "At least one topic must be provided via 'topics' or in the queue URI "
+                "(e.g., 'msk://broker:9098/my-topic')."
             )
-        except ValueError as err:
-            pytest.fail(f"URI parsing raised unexpected ValueError: {err}")
 
-        assert kwargs["topics"] == ["topic-a", "topic-b"]
-        assert kwargs["bootstrap_servers"] == "b-1.msk.us-east-1.amazonaws.com:9098"
-        assert kwargs["kafka_config_id"] == "msk_conn"
-
-    def test_trigger_kwargs_explicit_override(self):
-        provider = MskMessageQueueProvider()
-        kwargs = provider.trigger_kwargs(
-            "msk://ignored-host/ignored-topic",
-            topics=["override-topic"],
-            kafka_config_id="explicit_conn",
-            apply_function="my_pkg.my_evaluator",
+        kafka_config_id = (
+            conn_id
+            or uri_kwargs.get("kafka_config_id")
+            or uri_kwargs.get("conn_id")
+            or os.getenv("KAFKA_DEFAULT_CONN_ID", "kafka_default")
         )
-        assert kwargs["topics"] == ["override-topic"]
-        assert kwargs["kafka_config_id"] == "explicit_conn"
-        assert kwargs["apply_function"] == "my_pkg.my_evaluator"
 
-    def test_missing_topics_raises_value_error(self):
-        provider = MskMessageQueueProvider()
-        with pytest.raises(ValueError, match="At least one topic must be provided"):
-            provider.trigger_kwargs("msk://")
+        result = {
+            "topics": topics,
+            "kafka_config_id": kafka_config_id,
+            **uri_kwargs,
+            **kwargs,
+        }
 
-    def test_providers_manager_registration(self, cleanup_providers_manager):
-        try:
-            pm = ProvidersManager()
-            pm.initialize_providers_queues()
-        except Exception as err:
-            pytest.fail(f"ProvidersManager initialization failed: {err}")
+        if bootstrap_servers:
+            result["bootstrap_servers"] = bootstrap_servers
 
-        assert (
-            "airflow.providers.amazon.aws.queues.msk.MskMessageQueueProvider"
-            in pm.queue_class_names
-        )
+        return result

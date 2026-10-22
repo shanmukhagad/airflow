@@ -7,6 +7,7 @@ pytest.importorskip("airflow.providers.common.messaging.providers.base_provider"
 from airflow.providers.amazon.aws.queues.msk import MskMessageQueueProvider
 from airflow.providers_manager import ProvidersManager
 
+
 class TestMskMessageQueueProvider:
     def test_scheme_and_matching(self):
         provider = MskMessageQueueProvider()
