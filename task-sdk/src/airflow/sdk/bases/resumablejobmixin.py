@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
@@ -25,12 +27,29 @@ from airflow.sdk._shared.observability.metrics import stats
 from airflow.sdk.bases.operator import BaseOperatorMeta
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
-
     from airflow.sdk.definitions.context import Context
     from airflow.sdk.types import Logger
 
 tracer = trace.get_tracer(__name__)
+
+
+class ReconnectDecisionStatus(StrEnum):
+    """Possible outcomes when assessing reconnection to an external job."""
+
+    RECONNECT = "reconnect"
+    ALREADY_SUCCEEDED = "already_succeeded"
+    TERMINAL_RESUBMIT = "terminal_resubmit"
+    FRESH_SUBMIT = "fresh_submit"
+    NO_TASK_STATE_STORE = "no_task_state_store"
+
+
+@dataclass
+class ReconnectDecision:
+    """Container holding the reconnect decision and associated job details."""
+
+    status: ReconnectDecisionStatus
+    external_id: Any = None
+    prior_status: str | None = None
 
 
 class ResumableJobMixin(ABC):
@@ -67,7 +86,7 @@ class ResumableJobMixin(ABC):
             def submit_job(self, context) -> JsonValue:
                 return self.hook.submit(...)
 
-            def get_job_status(self, external_id: JsonValue, context: Context) -> str:
+            def get_job_status(self, external_id: Any, context: Context) -> str:
                 return self.hook.get_status(external_id)
 
             def is_job_active(self, status: str) -> bool:
@@ -76,10 +95,10 @@ class ResumableJobMixin(ABC):
             def is_job_succeeded(self, status: str) -> bool:
                 return status == "SUCCEEDED"
 
-            def poll_until_complete(self, external_id: JsonValue, context: Context) -> None:
+            def poll_until_complete(self, external_id: Any, context: Context) -> None:
                 self.hook.poll(external_id)
 
-            def get_job_result(self, external_id: JsonValue, context: Context) -> Any:
+            def get_job_result(self, external_id: Any, context: Context) -> Any:
                 return None
     """
 
@@ -100,9 +119,98 @@ class ResumableJobMixin(ABC):
         super().__init__(**kwargs)
         self.durable = durable
 
+    def get_reconnect_decision(self, context: Context) -> ReconnectDecision:
+        """
+        Evaluate task_state_store and remote job status to determine reconnection strategy.
+
+        Returns a ReconnectDecision indicating whether to reconnect, return early,
+        or submit a fresh job.
+        """
+        if not self.durable:
+            return ReconnectDecision(status=ReconnectDecisionStatus.FRESH_SUBMIT)
+
+        stats_tags = {"operator": type(self).__name__}
+        ti = context.get("ti")
+        if ti is not None and (team_name := ti.stats_tags.get("team_name")):
+            stats_tags["team_name"] = team_name
+
+        with tracer.start_as_current_span("resumable_job.resume_decision") as span:
+            span.set_attribute("operator", type(self).__name__)
+            span.set_attribute("resumable.external_id_key", self.external_id_key)
+
+            task_state_store = context.get("task_state_store")
+
+            if task_state_store is None:
+                span.set_attribute("resumable.decision", ReconnectDecisionStatus.NO_TASK_STATE_STORE.value)
+                self.log.warning(
+                    "task_state_store not available in context, crash recovery is disabled for this run"
+                )
+                return ReconnectDecision(status=ReconnectDecisionStatus.NO_TASK_STATE_STORE)
+
+            external_id = task_state_store.get(self.external_id_key)
+            if not external_id:
+                span.set_attribute("resumable.decision", ReconnectDecisionStatus.FRESH_SUBMIT.value)
+                stats.incr("resumable_job.fresh_submit", tags=stats_tags)
+                self.log.debug(
+                    "No stored external ID found; submitting fresh job",
+                    external_id_key=self.external_id_key,
+                )
+                return ReconnectDecision(status=ReconnectDecisionStatus.FRESH_SUBMIT)
+
+            stats.incr("resumable_job.reconnect_attempt", tags=stats_tags)
+            status = self.get_job_status(external_id, context)
+
+            span.set_attribute("resumable.external_id", str(external_id))
+            span.set_attribute("resumable.prior_status", status)
+
+            if self.is_job_active(status):
+                span.set_attribute("resumable.decision", ReconnectDecisionStatus.RECONNECT.value)
+                stats.incr("resumable_job.reconnect_success", tags=stats_tags)
+                self.log.info(
+                    "Reconnecting to existing job",
+                    external_id_key=self.external_id_key,
+                    external_id=external_id,
+                    status=status,
+                )
+                return ReconnectDecision(
+                    status=ReconnectDecisionStatus.RECONNECT,
+                    external_id=external_id,
+                    prior_status=status,
+                )
+
+            if self.is_job_succeeded(status):
+                span.set_attribute("resumable.decision", ReconnectDecisionStatus.ALREADY_SUCCEEDED.value)
+                stats.incr("resumable_job.already_succeeded", tags=stats_tags)
+                self.log.info(
+                    "Job already completed successfully, skipping resubmission",
+                    external_id_key=self.external_id_key,
+                    external_id=external_id,
+                )
+                return ReconnectDecision(
+                    status=ReconnectDecisionStatus.ALREADY_SUCCEEDED,
+                    external_id=external_id,
+                    prior_status=status,
+                )
+
+            span.set_attribute("resumable.decision", ReconnectDecisionStatus.TERMINAL_RESUBMIT.value)
+            stats.incr("resumable_job.terminal_resubmit", tags=stats_tags)
+            self.log.warning(
+                "Prior job in terminal state, resubmitting fresh",
+                external_id_key=self.external_id_key,
+                external_id=external_id,
+                status=status,
+            )
+            return ReconnectDecision(
+                status=ReconnectDecisionStatus.TERMINAL_RESUBMIT,
+                external_id=external_id,
+                prior_status=status,
+            )
+
     def execute_resumable(self, context: Context) -> Any:
         """
         Core of the resumable execution logic. Call this from execute() when reconnection is supported.
+
+        Delegates reconnect decision evaluation to `get_reconnect_decision()`.
 
         On initial run: submits the job, persists the external ID to task_state_store, then polls.
 
@@ -122,82 +230,16 @@ class ResumableJobMixin(ABC):
             self.poll_until_complete(external_id, context)
             return self.get_job_result(external_id, context)
 
-        stats_tags = {"operator": type(self).__name__}
-        # The task is team-scoped in multi-team deployments; surface team_name on the
-        # resumable_job metrics via the running task instance's stats tags (omitted when
-        # not multi-team or the task has no team).
-        ti = context.get("ti")
-        if ti is not None and (team_name := ti.stats_tags.get("team_name")):
-            stats_tags["team_name"] = team_name
+        decision = self.get_reconnect_decision(context)
 
-        reconnect_to: Any = None
-        already_succeeded_id: Any = None
+        if decision.status == ReconnectDecisionStatus.RECONNECT and decision.external_id is not None:
+            self.poll_until_complete(decision.external_id, context)
+            return self.get_job_result(decision.external_id, context)
+        if decision.status == ReconnectDecisionStatus.ALREADY_SUCCEEDED and decision.external_id is not None:
+            return self.get_job_result(decision.external_id, context)
 
-        with tracer.start_as_current_span("resumable_job.resume_decision") as span:
-            span.set_attribute("operator", type(self).__name__)
-            span.set_attribute("resumable.external_id_key", self.external_id_key)
-
-            task_state_store = context.get("task_state_store")
-
-            if task_state_store is None:
-                span.set_attribute("resumable.decision", "no_task_state_store")
-                self.log.warning(
-                    "task_state_store not available in context, crash recovery is disabled for this run"
-                )
-            else:
-                external_id = task_state_store.get(self.external_id_key)
-                if external_id:
-                    stats.incr("resumable_job.reconnect_attempt", tags=stats_tags)
-
-                    status = self.get_job_status(external_id, context)
-
-                    span.set_attribute("resumable.external_id", str(external_id))
-                    span.set_attribute("resumable.prior_status", status)
-
-                    if self.is_job_active(status):
-                        # Job is still running, skip submission and reconnect to it.
-                        span.set_attribute("resumable.decision", "reconnect")
-                        stats.incr("resumable_job.reconnect_success", tags=stats_tags)
-                        self.log.info(
-                            "Reconnecting to existing job",
-                            external_id_key=self.external_id_key,
-                            external_id=external_id,
-                            status=status,
-                        )
-                        reconnect_to = external_id
-                    elif self.is_job_succeeded(status):
-                        # Job already finished successfully, skip polling and return result directly.
-                        span.set_attribute("resumable.decision", "already_succeeded")
-                        stats.incr("resumable_job.already_succeeded", tags=stats_tags)
-                        self.log.info(
-                            "Job already completed successfully, skipping resubmission",
-                            external_id_key=self.external_id_key,
-                            external_id=external_id,
-                        )
-                        already_succeeded_id = external_id
-                    else:
-                        # Job is in a terminal failed state, fall through and submit a new job.
-                        span.set_attribute("resumable.decision", "terminal_resubmit")
-                        stats.incr("resumable_job.terminal_resubmit", tags=stats_tags)
-                        self.log.warning(
-                            "Prior job in terminal state, resubmitting fresh",
-                            external_id_key=self.external_id_key,
-                            external_id=external_id,
-                            status=status,
-                        )
-                else:
-                    span.set_attribute("resumable.decision", "fresh_submit")
-                    stats.incr("resumable_job.fresh_submit", tags=stats_tags)
-                    self.log.debug(
-                        "No stored external ID found; submitting fresh job",
-                        external_id_key=self.external_id_key,
-                    )
-
-        if reconnect_to is not None:
-            return self.poll_until_complete(reconnect_to, context)
-        if already_succeeded_id is not None:
-            return self.get_job_result(already_succeeded_id, context)
         external_id = self.submit_job(context)
+        task_state_store = context.get("task_state_store")
 
         if task_state_store is not None and external_id is not None:
             task_state_store.set(self.external_id_key, external_id)
@@ -211,7 +253,7 @@ class ResumableJobMixin(ABC):
         return self.get_job_result(external_id, context)
 
     @abstractmethod
-    def submit_job(self, context: Context) -> JsonValue:
+    def submit_job(self, context: Context) -> Any:
         """
         Submit the job to the external system. Return its external ID.
 
@@ -221,7 +263,7 @@ class ResumableJobMixin(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_job_status(self, external_id: JsonValue, context: Context) -> str:
+    def get_job_status(self, external_id: Any, context: Context) -> str:
         """
         Query the external system for the current job status.
 
@@ -253,11 +295,11 @@ class ResumableJobMixin(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def poll_until_complete(self, external_id: JsonValue, context: Context) -> None:
+    def poll_until_complete(self, external_id: Any, context: Context) -> None:
         """Block until the job reaches a terminal state. Raise on failure."""
         raise NotImplementedError
 
     @abstractmethod
-    def get_job_result(self, external_id: JsonValue, context: Context) -> Any:
+    def get_job_result(self, external_id: Any, context: Context) -> Any:
         """Return the job result after completion. Return None if not applicable."""
         raise NotImplementedError
