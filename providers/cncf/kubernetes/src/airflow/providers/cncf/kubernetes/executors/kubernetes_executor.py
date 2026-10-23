@@ -577,11 +577,11 @@ class KubernetesExecutor(BaseExecutor):
                     or "Unknown failure"
                 )
 
-                # Query current TaskInstance state from DB to verify if task ever left QUEUED state
+                # Fetch TaskInstance state dynamically from DB
+                ti_state = None
                 from airflow.models.taskinstance import TaskInstance
 
                 filter_for_tis = TaskInstance.filter_for_tis([key])
-                ti_state = None
                 if filter_for_tis is not None:
                     try:
                         ti_state = session.scalar(select(TaskInstance.state).where(filter_for_tis))
@@ -590,7 +590,7 @@ class KubernetesExecutor(BaseExecutor):
 
                 ti_state = TaskInstanceState(ti_state) if ti_state else None
 
-                excluded_reasons=getattr(
+                excluded_reasons = getattr(
                     self.kube_config,
                     "pod_launch_failure_excluded_container_reasons",
                     frozenset({"Error"}),
@@ -601,8 +601,7 @@ class KubernetesExecutor(BaseExecutor):
                     failure_details=failure_details,
                     excluded_container_reasons=excluded_reasons,
                 )
-                
-                # Format termination_reason to satisfy unit test assertion requirements
+
                 if is_infra_failure:
                     termination_reason = f"Infrastructure failure: Pod failed because of {failure_cause}"
                 else:
@@ -646,7 +645,6 @@ class KubernetesExecutor(BaseExecutor):
                 except KeyError:
                     self.log.debug("TI key not in running: %s", key)
                 return
-                
 
             if state == TaskInstanceState.RUNNING:
                 self.event_buffer[key] = state, None
@@ -655,21 +653,13 @@ class KubernetesExecutor(BaseExecutor):
             if self.kube_config.delete_worker_pods:
                 if state != TaskInstanceState.FAILED or self.kube_config.delete_worker_pods_on_failure:
                     self.kube_scheduler.delete_pod(pod_name=pod_name, namespace=namespace)
-                    self.log.info(
-                        "Deleted pod associated with the TI %s. Pod name: %s. Namespace: %s",
-                        key,
-                        pod_name,
-                        namespace,
-                    )
             else:
                 self.kube_scheduler.patch_pod_executor_done(pod_name=pod_name, namespace=namespace)
-                self.log.info("Patched pod %s in namespace %s to mark it as done", key, namespace)
 
             try:
                 self.running.remove(key)
             except KeyError:
-                self.log.debug("TI key not in running: %s", key)
-                # Return early ONLY when an untracked task is NOT a failure (satisfies test_change_state_key_not_in_running)
+                self.log.debug("TI key not in running, not adding to event_buffer: %s", key)
                 if state != TaskInstanceState.FAILED:
                     return
 
@@ -683,7 +673,6 @@ class KubernetesExecutor(BaseExecutor):
                     state = None
                 state = TaskInstanceState(state) if state else None
 
-            # --- UPDATE EVENT BUFFER ---
             if is_infra_failure:
                 self._handle_infra_failure(key, termination_reason=termination_reason)
             else:
@@ -694,7 +683,6 @@ class KubernetesExecutor(BaseExecutor):
             if results.key in self.running:
                 self.running.remove(results.key)
             self.event_buffer[results.key] = TaskInstanceState.FAILED, str(e)
-
     def _get_pod_namespace(self, ti: TaskInstance):
         pod_override = (ti.executor_config or {}).get("pod_override")
         namespace = None
