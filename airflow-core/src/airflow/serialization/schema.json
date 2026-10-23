@@ -147,12 +147,9 @@
       "pattern": "^#[a-fA-F0-9]{3,6}$"
     },
     "extra_links": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "minProperties": 1,
-        "maxProperties": 1
-      }
+      "$comment": "Maps link name to the XCom key that holds the link (see _serialize_operator_extra_links)",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
     },
     "dag_dependencies": {
       "type": "array",
@@ -298,7 +295,7 @@
         "pool_slots": { "type": "number", "default": 1 },
         "execution_timeout": { "$ref": "#/definitions/timedelta" },
         "retry_delay": { "$ref": "#/definitions/timedelta", "default": 300.0 },
-        "retry_exponential_backoff": { "type": "number", "default": 0 },
+        "retry_exponential_backoff": { "type": ["number", "boolean"], "default": 0 },
         "max_retry_delay": { "$ref": "#/definitions/timedelta" },
         "params": { "$ref": "#/definitions/params" },
         "priority_weight": { "type": "number", "default": 1 },
@@ -354,9 +351,8 @@
         "max_active_tis_per_dagrun": {"type": "integer"}
       },
       "dependencies": {
-        "expand_input": ["partial_kwargs", "_is_mapped"],
-        "partial_kwargs": ["expand_input", "_is_mapped"],
-        "_is_mapped": ["expand_input", "partial_kwargs"]
+        "partial_kwargs": ["_is_mapped"],
+        "_is_mapped": ["partial_kwargs"]
       },
       "additionalProperties": true
     },
