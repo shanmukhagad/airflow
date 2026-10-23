@@ -24,6 +24,8 @@ from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, ClassVar
 
 from airflow.models.dag import DagModel
+from airflow.models.dag_version import DagVersion
+from airflow.utils.session import create_session
 from airflow.providers.common.compat.sdk import (
     AirflowSkipException,
     BaseOperatorLink,
@@ -343,9 +345,12 @@ class ExternalTaskSensor(BaseSensorOperator):
 
     def _poke_af3(self, context: Context, dttm_filter: Sequence[datetime.datetime]) -> bool:
         from airflow.providers.standard.utils.sensor_helper import _get_count_by_matched_states
-
-        self._has_checked_existence = True
+        
         ti = context["ti"]
+
+        if self.check_existence and not self._has_checked_existence:
+            with create_session() as session:
+                self._check_for_existence(session=session)
 
         def _get_count(states: list[str]) -> int:
             if self.external_task_ids:
@@ -535,37 +540,31 @@ class ExternalTaskSensor(BaseSensorOperator):
             )
 
     def _check_for_existence(self, session: Session) -> None:
-        dag_to_wait = DagModel.get_current(self.external_dag_id, session=session)
-
-        if not dag_to_wait:
-            raise ExternalDagNotFoundError(f"The external DAG {self.external_dag_id} does not exist.")
-
-        path = correct_maybe_zipped(dag_to_wait.fileloc)
-        if not path or not os.path.exists(path):
-            raise ExternalDagDeletedError(f"The external DAG {self.external_dag_id} was deleted.")
 
         if self.external_task_ids:
-            refreshed_dag_info = DagBag(dag_to_wait.fileloc).get_dag(self.external_dag_id)
-            if not refreshed_dag_info:
+            dag_version = DagVersion.get_latest_version(self.external_dag_id, session=session)
+            if not dag_version or not dag_version.serialized_dag:
                 raise ExternalDagNotFoundError(
-                    f"The external DAG {self.external_dag_id} could not be loaded."
+                    f"The external DAG {self.external_dag_id} could not be loaded"
                 )
+            serialized_dag = dag_version.serialized_dag.dag
             for external_task_id in self.external_task_ids:
-                if not refreshed_dag_info.has_task(external_task_id):
-                    raise ExternalTaskNotFoundError(
-                        f"The external task {external_task_id} in DAG {self.external_dag_id} does not exist."
+                if not serialized_dag.has_task(external_task_id):
+                    raise ExternalTaskNotFoundError (
+                        f"The external task {external_task_id} in DAG {self.external_dag_id} does not exist"
                     )
 
         if self.external_task_group_id:
-            refreshed_dag_info = DagBag(dag_to_wait.fileloc).get_dag(self.external_dag_id)
-            if not refreshed_dag_info:
+            dag_version = DagVersion.get_latest_version(self.external_dag_id, session=session)
+            if not dag_version or not dag_version.serialized_dag:
                 raise ExternalDagNotFoundError(
-                    f"The external DAG {self.external_dag_id} could not be loaded."
+                    f"The external DAG {self.external_dag_id} could not be loaded"
                 )
-            if not refreshed_dag_info.has_task_group(self.external_task_group_id):
-                raise ExternalTaskGroupNotFoundError(
+            serialized_dag = dag_version.serialized_dag.dag
+            if self.external_task_group_id not in serialized_dag.task_group_dict:
+                raise ExternalTaskGroupNotFoundError (
                     f"The external task group '{self.external_task_group_id}' in "
-                    f"DAG '{self.external_dag_id}' does not exist."
+                    f"DAG '{self.external_dag_id}' does not exist"
                 )
 
         self._has_checked_existence = True

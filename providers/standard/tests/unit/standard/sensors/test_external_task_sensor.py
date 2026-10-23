@@ -1565,6 +1565,54 @@ class TestExternalTaskSensorV3:
         )
         assert op.external_dates_filter == DEFAULT_DATE.isoformat()
 
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_raises_when_task_not_found(self, mock_method, dag_maker):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = False
+        mock_method.return_value = mock_version
+
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+                task_id="test_external_task_sensor_check",
+                external_dag_id="test_dag_parent",
+                external_task_id="non_existing_task",
+                check_existence=True,
+            )
+
+        with pytest.raises(ExternalTaskNotFoundError):
+            op.execute(context=self.context)
+
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_does_not_raise_when_dag_run_not_yet_created(self,mock_method,dag_maker):
+        mock_version = mock.MagicMock()
+        mock_version.serialized_dag.dag.has_task.return_value = True
+        mock_method.return_value = mock_version
+
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+            task_id="test_external_task_sensor_check",
+            external_dag_id="test_dag_parent",
+            external_task_id="non_existing_task",
+            check_existence=True,
+            )
+
+        assert op.poke(context=self.context) is False
+
+    @mock.patch("airflow.providers.standard.sensors.external_task.DagVersion.get_latest_version")
+    def test_check_existence_raises_when_dag_version_is_none(self, mock_method, dag_maker):
+        mock_method.return_value = None
+    
+        with dag_maker("test_dag_child"):
+            op = ExternalTaskSensor(
+            task_id="test_external_task_sensor_check",
+            external_dag_id="test_dag_parent",
+            external_task_id="non_existing_task",
+            check_existence=True,
+            )
+    
+        with pytest.raises(ExternalDagNotFoundError):
+            op.execute(context=self.context)
+
     @pytest.mark.execution_timeout(10)
     def test_external_task_sensor_task_group_failed_states(self, dag_maker):
         with dag_maker("test_dag_child"):
