@@ -1049,6 +1049,7 @@ class TestBeamRunPythonPipelineOperatorAsync:
     @mock.patch(BEAM_OPERATOR_PATH.format("GCSHook"))
     def test_on_kill_direct_runner(self, _, dataflow_mock, __):
         dataflow_cancel_job = dataflow_mock.return_value.cancel_job
+        dataflow_mock.return_value.fetch_job_id_by_name.return_value = None
         op = BeamRunPythonPipelineOperator(runner="DataflowRunner", **self.default_op_kwargs)
         if AIRFLOW_V_3_0_PLUS:
             with pytest.raises(TaskDeferred):
@@ -1066,6 +1067,24 @@ class TestBeamRunPythonPipelineOperatorAsync:
                 op.execute(mock.MagicMock())
         op.on_kill()
         dataflow_cancel_job.assert_not_called()
+
+    @mock.patch(BEAM_OPERATOR_PATH.format("DataflowJobLink.persist"))
+    @mock.patch(BEAM_OPERATOR_PATH.format("BeamHook"))
+    @mock.patch(BEAM_OPERATOR_PATH.format("GCSHook"))
+    @mock.patch(BEAM_OPERATOR_PATH.format("DataflowHook"))
+    def test_defer_finds_job_id_by_name_when_not_in_stdout(
+        self, dataflow_hook_mock, gcs_hook_mock, beam_hook_mock, persist_mock
+    ):
+        """If the launcher never reports a job id, the job id is found by job name (#68279)."""
+        dataflow_hook_mock.return_value.fetch_job_id_by_name.return_value = JOB_ID
+        op = BeamRunPythonPipelineOperator(runner="DataflowRunner", **self.default_op_kwargs)
+
+        with pytest.raises(TaskDeferred) as exc:
+            op.execute(context=mock.MagicMock())
+
+        assert op.dataflow_job_id == JOB_ID
+        _, trigger_kwargs = exc.value.trigger.serialize()
+        assert trigger_kwargs["job_id"] == JOB_ID
 
 
 class TestBeamRunJavaPipelineOperatorAsync:

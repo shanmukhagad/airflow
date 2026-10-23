@@ -1174,6 +1174,33 @@ class DataflowHook(GoogleBaseHook):
         return jobs_controller.fetch_job_by_id(job_id)
 
     @GoogleBaseHook.fallback_to_default_project_id
+    def fetch_job_id_by_name(
+        self,
+        job_name: str,
+        project_id: str = PROVIDE_PROJECT_ID,
+        location: str = DEFAULT_DATAFLOW_LOCATION,
+    ) -> str | None:
+        """
+        Get the Job ID of the job with the specified name.
+
+        :param job_name: Name of the job to look for.
+        :param project_id: Optional, the Google Cloud project ID in which the job was started.
+            If set to None or missing, the default project_id from the Google Cloud connection is used.
+        :param location: The location of the Dataflow job (for example europe-west1).
+        :return: the Job ID if exactly one job is found, otherwise None.
+        """
+        jobs_controller = _DataflowJobsController(
+            dataflow=self.get_conn(),
+            project_number=project_id,
+            location=location,
+            num_retries=self.num_retries,
+        )
+        jobs = jobs_controller._fetch_jobs_by_prefix_name(job_name.lower())
+        if len(jobs) == 1:
+            return jobs[0]["id"]
+        return None
+
+    @GoogleBaseHook.fallback_to_default_project_id
     def fetch_job_metrics_by_id(
         self,
         job_id: str,
