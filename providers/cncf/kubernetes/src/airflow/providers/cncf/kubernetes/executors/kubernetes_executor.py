@@ -525,7 +525,6 @@ class KubernetesExecutor(BaseExecutor):
             ti_state = None
             try:
                 from airflow.models.taskinstance import TaskInstance
-
                 filter_for_tis = TaskInstance.filter_for_tis([key])
                 if filter_for_tis is not None:
                     ti_state = session.scalar(select(TaskInstance.state).where(filter_for_tis))
@@ -544,7 +543,6 @@ class KubernetesExecutor(BaseExecutor):
                 failure_details=failure_details,
                 excluded_container_reasons=excluded_reasons,
             )
-
             # Use pre-collected failure details from the watcher to avoid additional API calls
             if failure_details:
                 pod_status = failure_details.get("pod_status")

@@ -359,7 +359,6 @@ class TestKubernetesExecutor:
             resource_version="123",
             failure_details=None,
         )
-
         mock_is_pre_exec.return_value = True
         self.kubernetes_executor.running.add(key)
         self.kubernetes_executor._change_state(results)

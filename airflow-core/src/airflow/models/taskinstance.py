@@ -1953,13 +1953,10 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         """
         Handle Failure for a task instance.
 
-        
-
         :param error: if specified, log the specific exception if thrown
         :param test_mode: doesn't record success or failure in the DB if True
         :param session: SQLAlchemy ORM Session
         """
-
         try:
             if error and "Infrastructure failure" in str(error):
                 self.log.info(
