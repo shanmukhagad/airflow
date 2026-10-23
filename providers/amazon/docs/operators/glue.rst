@@ -74,6 +74,22 @@ To submit a new AWS Glue job you can use :class:`~airflow.providers.amazon.aws.o
   The same AWS IAM role used for the crawler can be used here as well, but it will need
   policies to provide access to the output location for result data.
 
+IAM Permissions
+^^^^^^^^^^^^^^^
+
+When resuming a Glue job by task UUID, Airflow requires the following IAM permission
+to search for existing Glue job runs:
+
+.. code-block::
+
+  {
+    "Effect": "Allow",
+    "Action": [
+      "glue:GetJobRuns"
+    ],
+    "Resource": "*"
+  }
+
 .. _howto/operator:GlueDataQualityOperator:
 
 Create an AWS Glue Data Quality
