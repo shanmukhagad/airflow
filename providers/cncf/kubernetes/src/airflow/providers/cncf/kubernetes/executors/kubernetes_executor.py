@@ -116,6 +116,33 @@ class KubernetesExecutor(BaseExecutor):
         self.completed: set[KubernetesResults] = set()
         self.create_pods_after: datetime | None = None
 
+    def _handle_infra_failure(self, key: TaskInstanceKey, termination_reason: str | None = None) -> None:
+        """Handle infrastructure failure by re-queuing the task without consuming retry attempts."""
+        self.log.warning("Handling infrastructure failure for task %s. Reason: %s. Re-queuing task.", key, termination_reason)
+        self.event_buffer[key] = TaskInstanceState.QUEUED, f"Infrastructure failure: {termination_reason}"
+
+    @staticmethod
+    def _is_pre_execution_failure(
+        state: TaskInstanceState | str | None,
+        ti_state: TaskInstanceState | None,
+        failure_details: dict[str, Any] | None,
+        excluded_container_reasons: frozenset[str],
+    ) -> bool:
+        try:
+            if state != TaskInstanceState.FAILED:
+                return False
+            if ti_state in (TaskInstanceState.RUNNING, TaskInstanceState.SUCCESS):
+                return False
+            if not failure_details:
+                return False
+            
+            container_reason = failure_details.get("container_reason")
+            if container_reason and container_reason in excluded_container_reasons:
+                return False
+            return True
+        except Exception:
+            return False
+
     def _list_pods(self, query_kwargs):
         query_kwargs["header_params"] = {
             "Accept": "application/json;as=PartialObjectMetadataList;v=v1;g=meta.k8s.io"
@@ -492,8 +519,32 @@ class KubernetesExecutor(BaseExecutor):
         failure_details = results.failure_details
 
         termination_reason: str | None = None
+        is_infra_failure: bool = False
 
         if state == TaskInstanceState.FAILED:
+            ti_state = None
+            try:
+                from airflow.models.taskinstance import TaskInstance
+
+                filter_for_tis = TaskInstance.filter_for_tis([key])
+                if filter_for_tis is not None:
+                    ti_state = session.scalar(select(TaskInstance.state).where(filter_for_tis))
+                ti_state = TaskInstanceState(ti_state) if ti_state else None
+            except Exception:
+                pass
+
+            excluded_reasons = getattr(
+                self.kube_config,
+                "pod_launch_failure_excluded_container_reasons",
+                frozenset({"Error"}),
+            )
+            is_infra_failure = self._is_pre_execution_failure(
+                state=state,
+                ti_state=ti_state,
+                failure_details=failure_details,
+                excluded_container_reasons=excluded_reasons,
+            )
+
             # Use pre-collected failure details from the watcher to avoid additional API calls
             if failure_details:
                 pod_status = failure_details.get("pod_status")
@@ -532,7 +583,7 @@ class KubernetesExecutor(BaseExecutor):
                     "Task %s failed in pod %s/%s (no details available)", task_key_str, namespace, pod_name
                 )
 
-        if state == ADOPTED:
+        if state == ADOPTED or state =="adopted":
             # When the task pod is adopted by another executor,
             # then remove the task from the current executor running queue.
             try:
@@ -575,7 +626,10 @@ class KubernetesExecutor(BaseExecutor):
                 state = None
             state = TaskInstanceState(state) if state else None
 
-        self.event_buffer[key] = state, termination_reason
+        if is_infra_failure:
+            self._handle_infra_failure(key, termination_reason=termination_reason)
+        else:
+            self.event_buffer[key] = state, termination_reason
 
     def _get_pod_namespace(self, ti: TaskInstance):
         pod_override = (ti.executor_config or {}).get("pod_override")
