@@ -2402,6 +2402,40 @@ class TestTaskInstance:
         assert "error" in callback_args
         assert callback_args["error"] == error_message
 
+    def _handle_failure_with_listener_mocks(self, dag_maker, retries):
+        from airflow.listeners.listener import get_listener_manager
+
+        hook = get_listener_manager().pm.hook
+        with (
+            mock.patch.object(hook, "on_task_instance_failed") as failed_cb,
+            mock.patch.object(hook, "on_task_instance_up_for_retry") as retry_cb,
+        ):
+            session = settings.Session()
+            with dag_maker():
+                task = EmptyOperator(task_id="mytask", retries=retries)
+            dr = dag_maker.create_dagrun()
+            ti = dr.get_task_instance(task.task_id)
+            ti.state = State.QUEUED
+            session.merge(ti)
+            session.flush()
+            ti.handle_failure("test failure", test_mode=True)
+        return ti, failed_cb, retry_cb
+
+    def test_handle_failure_calls_up_for_retry_listener_when_retry_eligible(self, dag_maker):
+        ti, failed_cb, retry_cb = self._handle_failure_with_listener_mocks(dag_maker, retries=1)
+
+        assert ti.state == State.UP_FOR_RETRY
+        failed_cb.assert_called_once()
+        retry_cb.assert_called_once()
+        assert retry_cb.call_args.kwargs["error"] == "test failure"
+
+    def test_handle_failure_does_not_call_up_for_retry_listener_on_terminal_failure(self, dag_maker):
+        ti, failed_cb, retry_cb = self._handle_failure_with_listener_mocks(dag_maker, retries=0)
+
+        assert ti.state == State.FAILED
+        failed_cb.assert_called_once()
+        retry_cb.assert_not_called()
+
     def test_handle_failure_updates_queued_task_updates_state(self, dag_maker):
         session = settings.Session()
         with dag_maker():

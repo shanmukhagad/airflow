@@ -4732,6 +4732,66 @@ class TestTaskRunnerCallsListeners:
         assert listener.state == [TaskInstanceState.RUNNING, TaskInstanceState.FAILED]
         assert listener.error == error
 
+    def _finalize_with_retry_listener(self, listener_manager, state):
+        class RetryListener:
+            def __init__(self):
+                self.events = []
+                self.errors = {}
+
+            @hookimpl
+            def on_task_instance_failed(self, previous_state, task_instance, error):
+                self.events.append("failed")
+                self.errors["failed"] = error
+
+            @hookimpl
+            def on_task_instance_up_for_retry(self, previous_state, task_instance, error):
+                self.events.append("up_for_retry")
+                self.errors["up_for_retry"] = error
+
+        listener = RetryListener()
+        listener_manager(listener)
+
+        class CustomOperator(BaseOperator):
+            def execute(self, context): ...
+
+        task = CustomOperator(task_id="test_up_for_retry_listener", retries=1)
+        dag = get_inline_dag(dag_id="test_dag", task=task)
+        ti = TaskInstance(
+            id=uuid7(),
+            task_id=task.task_id,
+            dag_id=dag.dag_id,
+            run_id="test_run",
+            try_number=1,
+            dag_version_id=uuid7(),
+        )
+        runtime_ti = RuntimeTaskInstance.model_construct(
+            **ti.model_dump(exclude_unset=True), task=task, start_date=timezone.utcnow()
+        )
+        log = mock.MagicMock()
+        context = runtime_ti.get_template_context()
+        error = ValueError("boom")
+        finalize(runtime_ti, state, context, log, error)
+        return listener, error
+
+    def test_task_runner_calls_up_for_retry_listener_on_retry(
+        self, mocked_parse, mock_supervisor_comms, listener_manager
+    ):
+        listener, error = self._finalize_with_retry_listener(
+            listener_manager, TaskInstanceState.UP_FOR_RETRY
+        )
+
+        assert listener.events == ["failed", "up_for_retry"]
+        assert listener.errors["up_for_retry"] is error
+        assert str(listener.errors["up_for_retry"]) == "boom"
+
+    def test_task_runner_does_not_call_up_for_retry_listener_on_terminal_failure(
+        self, mocked_parse, mock_supervisor_comms, listener_manager
+    ):
+        listener, error = self._finalize_with_retry_listener(listener_manager, TaskInstanceState.FAILED)
+
+        assert listener.events == ["failed"]
+        assert listener.errors["failed"] is error
+
     def test_task_runner_calls_listeners_skipped(self, mocked_parse, mock_supervisor_comms, listener_manager):
         listener = self.CustomListener()
         listener_manager(listener)
