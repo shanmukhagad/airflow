@@ -215,6 +215,41 @@ class TestCliTasks:
             )
         )
 
+    def test_cli_test_with_xcoms(self):
+        """The XCom passed with --xcoms is used by the task instead of the upstream task."""
+        args = self.parser.parse_args(
+            [
+                "tasks",
+                "test",
+                "example_passing_xcoms_via_test_command",
+                "print_message",
+                "--xcoms",
+                '[{"task_id": "get_message", "value": "test message"}]',
+            ]
+        )
+
+        with redirect_stdout(io.StringIO()) as stdout:
+            task_command.task_test(args)
+
+        assert "Received message: test message" in stdout.getvalue()
+
+    def test_cli_test_with_xcoms_and_existing_dag_run(self):
+        """--xcoms is not allowed when an existing DAG run is used."""
+        args = self.parser.parse_args(
+            [
+                "tasks",
+                "test",
+                self.dag_id,
+                "print_the_context",
+                DEFAULT_DATE.isoformat(),
+                "--xcoms",
+                '[{"task_id": "some_task", "value": 1}]',
+            ]
+        )
+
+        with pytest.raises(ValueError, match="--xcoms can only be used"):
+            task_command.task_test(args)
+
     @pytest.mark.parametrize(
         ("env_var_args", "expected_foo"),
         [

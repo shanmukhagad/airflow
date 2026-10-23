@@ -836,6 +836,15 @@ ARG_ENV_VARS = Arg(
     type=json.loads,
 )
 
+ARG_XCOMS = Arg(
+    ("--xcoms",),
+    help=(
+        "Sends a JSON list of XCom values to the task, as if upstream tasks pushed them. "
+        "Each item needs 'task_id' and 'value'; 'key' is optional (default: return_value)"
+    ),
+    type=json.loads,
+)
+
 # connections
 ARG_CONN_ID = Arg(("conn_id",), help="Connection id, required to get/add/delete/test a connection", type=str)
 ARG_CONN_URI = Arg(
@@ -1529,6 +1538,7 @@ TASKS_COMMANDS = (
             ARG_TASK_PARAMS,
             ARG_POST_MORTEM,
             ARG_ENV_VARS,
+            ARG_XCOMS,
             ARG_MAP_INDEX,
             ARG_VERBOSE,
         ),

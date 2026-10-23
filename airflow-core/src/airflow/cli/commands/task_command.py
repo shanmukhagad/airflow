@@ -37,6 +37,7 @@ from airflow.models.dag_version import DagVersion
 from airflow.models.dagrun import DagRun, get_or_create_dagrun
 from airflow.models.expandinput import NotFullyPopulated
 from airflow.models.serialized_dag import SerializedDagModel
+from airflow.models.xcom import XComModel
 from airflow.sdk.definitions.dag import DAG, _run_task
 from airflow.sdk.definitions.param import ParamsDict
 from airflow.serialization.definitions.dag import SerializedDAG
@@ -439,6 +440,21 @@ def task_test(args, dag: DAG | None = None) -> None:
         create_if_necessary="db",
     )
     try:
+        if args.xcoms:
+            if not dr_created:
+                raise ValueError(
+                    "--xcoms can only be used with a temporary DAG run. "
+                    "Do not pass an existing run id or logical date."
+                )
+            for xcom in args.xcoms:
+                XComModel.set(
+                    key=xcom.get("key", "return_value"),
+                    value=xcom["value"],
+                    dag_id=ti.dag_id,
+                    task_id=xcom["task_id"],
+                    run_id=ti.run_id,
+                    serialize=False,
+                )
         # TODO: move bulk of this logic into the SDK: http://github.com/apache/airflow/issues/54658
         from airflow.sdk._shared.secrets_masker import RedactedIO
 
