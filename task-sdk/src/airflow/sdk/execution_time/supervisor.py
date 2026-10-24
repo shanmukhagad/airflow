@@ -253,10 +253,12 @@ def _subprocess_main():
 
     main()
 
+
 def _callback_subprocess_main():
     from airflow.sdk.execution_time.callback_runner import _main
 
     _main()
+
 
 def _reset_signals():
     # Uninstall the rich etc. exception handler
@@ -1409,7 +1411,7 @@ class ActivitySubprocess(WatchedSubprocess):
 
     _task_end_time_monotonic: float | None = attrs.field(default=None, init=False)
     _rendered_map_index: str | None = attrs.field(default=None, init=False)
-
+    _timeout_deadline: float | None = attrs.field(default=None, init=False)
     decoder: ClassVar[TypeAdapter[ToSupervisor]] = TypeAdapter(ToSupervisor)
 
     ti: RuntimeTI | None = None
@@ -1450,6 +1452,16 @@ class ActivitySubprocess(WatchedSubprocess):
         )
         return proc
 
+    def _handle_execution_timeout_if_needed(self) -> None:
+        """Check if execution timeout has passed and terminate the child process group."""
+        if self._timeout_deadline and time.monotonic() > self._timeout_deadline:
+            log.error(
+                "Task execution timed out after %s. Forcibly terminating process.",
+                getattr(self.ti, "execution_timeout", "unknown"),
+            )
+            self.kill(signal.SIGTERM, force=True)
+            self._timeout_deadline = None
+
     def _on_child_started(
         self,
         *,
@@ -1467,6 +1479,12 @@ class ActivitySubprocess(WatchedSubprocess):
             ti_context = self.client.task_instances.start(ti.id, self.pid, datetime.now(tz=timezone.utc))
             self._should_retry = ti_context.should_retry
             self._last_successful_heartbeat = time.monotonic()
+
+            if getattr(self.ti, "execution_timeout", None):
+                self._timeout_deadline = time.monotonic() + self.ti.execution_timeout.total_seconds()
+            else:
+                self._timeout_deadline = None
+
         except Exception:
             # On any error kill that subprocess!
             self.kill(signal.SIGKILL)
@@ -1687,8 +1705,6 @@ class ActivitySubprocess(WatchedSubprocess):
                 self._handle_process_overtime_if_needed()
 
     def _handle_process_overtime_if_needed(self):
-        """Handle termination of auxiliary processes if the task exceeds the configured overtime."""
-        # If the task has reached a terminal state, we can start monitoring the overtime
         if not self._terminal_state:
             return
         if (
@@ -1702,6 +1718,10 @@ class ActivitySubprocess(WatchedSubprocess):
                 ti_id=self.id,
             )
             self.kill(signal.SIGTERM, force=True)
+
+    def _monitor_subprocess(self) -> None:
+        while not self._stopped:
+            self._handle_execution_timeout_if_needed()
 
     def _send_heartbeat_if_needed(self):
         """Send a heartbeat to the client if heartbeat interval has passed."""
@@ -2702,6 +2722,7 @@ def supervise(**kwargs) -> int:
         stacklevel=2,
     )
     return supervise_task(**kwargs)
+
 
 @attrs.define(kw_only=True)
 class CallbackSubprocess(WatchedSubprocess):
