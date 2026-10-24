@@ -31,7 +31,8 @@ import warnings
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any ,Optional
+from types import FrameType
 
 from airflow import settings
 from airflow._shared.module_loading.file_discovery import find_path_from_directory
@@ -52,6 +53,37 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+class SegfaultImportError(Exception):
+    pass
+
+def _sigsegv_handler(signum: int, frame: Optional[FrameType]) -> None:
+    raise SegfaultImportError("Received SIGSEGV signal while importing DAG file.")
+
+def record_import_error(file_path: str, error_message: str) -> None:
+    log.error("DAG import error for %s: %s", file_path, error_message)
+
+def _execute_import(file_path: str) -> None:
+    pass
+
+def parse_dag_file(file_path: str):
+    old_handler = signal.signal(signal.SIGSEGV, _sigsegv_handler)
+    
+    try:
+        log.info("Importing DAG file: %s", file_path)
+        _execute_import(file_path)
+        
+    except SegfaultImportError as err:
+        log.error("Received SIGSEGV signal while processing %s", file_path)
+        record_import_error(file_path, str(err))
+        return None
+        
+    except Exception as ex:
+        log.exception("Failed to import DAG file %s", file_path)
+        record_import_error(file_path, str(ex))
+        return None
+        
+    finally:
+        signal.signal(signal.SIGSEGV, old_handler)
 
 @contextlib.contextmanager
 def _timeout(seconds: float = 1, error_message: str = "Timeout"):
