@@ -1190,3 +1190,149 @@ class TestClearTasks:
 
         cleared_ids = {ti.task_id for ti in cleared}
         assert cleared_ids == {"teardown_t"}
+
+    def test_clear_task_instances_discards_task_state_by_default(self):
+        from unittest import mock
+
+        from airflow.models.dagrun import DagRun
+        from airflow.models.task_state_store import TaskStateStoreModel
+
+        mock_ti = mock.MagicMock(spec=TaskInstance)
+        mock_ti.dag_id = "test_dag"
+        mock_ti.task_id = "test_task"
+        mock_ti.run_id = "run_1"
+        mock_ti.map_index = -1
+        mock_ti.state = TaskInstanceState.RESTARTING
+
+        mock_dr = mock.MagicMock(spec=DagRun)
+        mock_dr.clear_number = 0
+        mock_dr.conf = {}
+        mock_dr.created_dag_version_id = None
+        mock_dr.dag = None
+        mock_dr.dag_model = None
+        mock_dr.context_carrier = None
+        mock_ti.dag_run = mock_dr
+
+        session = mock.MagicMock()
+        mock_scalar_result = mock.MagicMock()
+        mock_scalar_result.all.return_value = [mock_dr]
+        session.scalars.return_value = mock_scalar_result
+
+        clear_task_instances([mock_ti], session=session)
+
+        executed_stmts = [call[0][0] for call in session.execute.call_args_list if call.args]
+        deleted_tables = [
+            stmt.table.name
+            for stmt in executed_stmts
+            if hasattr(stmt, "table") and hasattr(stmt.table, "name")
+        ]
+        assert TaskStateStoreModel.__tablename__ in deleted_tables
+
+    def test_clear_task_instances_preserves_task_state_when_flag_set(self):
+        from unittest import mock
+
+        from airflow.models.dagrun import DagRun
+        from airflow.models.task_state_store import TaskStateStoreModel
+
+        mock_ti = mock.MagicMock(spec=TaskInstance)
+        mock_ti.dag_id = "test_dag"
+        mock_ti.task_id = "test_task"
+        mock_ti.run_id = "run_1"
+        mock_ti.map_index = -1
+        mock_ti.state = TaskInstanceState.RESTARTING
+
+        mock_dr = mock.MagicMock(spec=DagRun)
+        mock_dr.clear_number = 0
+        mock_dr.conf = {}
+        mock_dr.created_dag_version_id = None
+        mock_dr.dag = None
+        mock_dr.dag_model = None
+        mock_dr.context_carrier = None
+        mock_ti.dag_run = mock_dr
+
+        session = mock.MagicMock()
+        mock_scalar_result = mock.MagicMock()
+        mock_scalar_result.all.return_value = [mock_dr]
+        session.scalars.return_value = mock_scalar_result
+
+        clear_task_instances([mock_ti], keep_task_state=True, session=session)
+
+        executed_stmts = [call[0][0] for call in session.execute.call_args_list if call.args]
+        deleted_tables = [
+            stmt.table.name
+            for stmt in executed_stmts
+            if hasattr(stmt, "table") and hasattr(stmt.table, "name")
+        ]
+        assert TaskStateStoreModel.__tablename__ not in deleted_tables
+
+    def test_clear_task_instances_bulk_delete_handles_mapped_tasks(self):
+        from unittest import mock
+
+        from airflow.models.dagrun import DagRun
+        from airflow.models.task_state_store import TaskStateStoreModel
+
+        ti_normal = mock.MagicMock(spec=TaskInstance)
+        ti_normal.dag_id = "test_dag"
+        ti_normal.task_id = "task_normal"
+        ti_normal.run_id = "run_1"
+        ti_normal.map_index = -1
+        ti_normal.state = TaskInstanceState.RESTARTING
+
+        ti_mapped = mock.MagicMock(spec=TaskInstance)
+        ti_mapped.dag_id = "test_dag"
+        ti_mapped.task_id = "task_mapped"
+        ti_mapped.run_id = "run_1"
+        ti_mapped.map_index = 2
+        ti_mapped.state = TaskInstanceState.RESTARTING
+
+        mock_dr = mock.MagicMock(spec=DagRun)
+        mock_dr.clear_number = 0
+        mock_dr.conf = {}
+        mock_dr.created_dag_version_id = None
+        mock_dr.dag = None
+        mock_dr.dag_model = None
+        mock_dr.context_carrier = None
+
+        ti_normal.dag_run = mock_dr
+        ti_mapped.dag_run = mock_dr
+
+        session = mock.MagicMock()
+        mock_scalar_result = mock.MagicMock()
+        mock_scalar_result.all.return_value = [mock_dr]
+        session.scalars.return_value = mock_scalar_result
+
+        clear_task_instances([ti_normal, ti_mapped], session=session)
+
+        executed_stmts = [call[0][0] for call in session.execute.call_args_list if call.args]
+        deleted_tables = [
+            stmt.table.name
+            for stmt in executed_stmts
+            if hasattr(stmt, "table") and hasattr(stmt.table, "name")
+        ]
+        assert TaskStateStoreModel.__tablename__ in deleted_tables
+        # Ensure only 1 bulk delete call was executed, not N individual deletes
+        assert deleted_tables.count(TaskStateStoreModel.__tablename__) == 1
+
+    def test_clear_task_instances_empty_list_noops(self):
+        from unittest import mock
+
+        session = mock.MagicMock()
+        clear_task_instances([], session=session)
+        assert session.execute.call_count == 0
+
+    def test_cli_dag_and_task_clear_flags(self):
+        from airflow.cli import cli_parser
+
+        parser = cli_parser.get_parser()
+
+        # DAG clear default and flag
+        args_dag_default = parser.parse_args(["dags", "clear", "test_dag", "-y"])
+        assert args_dag_default.keep_task_state is False
+        args_dag_flag = parser.parse_args(["dags", "clear", "test_dag", "-y", "--keep-task-state"])
+        assert args_dag_flag.keep_task_state is True
+
+        # Task clear default and flag
+        args_task_default = parser.parse_args(["tasks", "clear", "test_dag", "-y"])
+        assert args_task_default.keep_task_state is False
+        args_task_flag = parser.parse_args(["tasks", "clear", "test_dag", "-y", "--keep-task-state"])
+        assert args_task_flag.keep_task_state is True

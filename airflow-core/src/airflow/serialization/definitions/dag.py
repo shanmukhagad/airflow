@@ -1251,6 +1251,7 @@ class SerializedDAG:
         exclude_task_ids: frozenset[str] | frozenset[tuple[str, int]] | None = frozenset(),
         exclude_run_ids: frozenset[str] | None = frozenset(),
         run_on_latest_version: bool = False,
+        keep_task_state: bool = False,
     ) -> int | Iterable[TaskInstance] | set[str]:
         """
         Clear a set of task instances associated with the current dag for a specified date range.
@@ -1341,6 +1342,7 @@ class SerializedDAG:
             session,
             dag_run_state=dag_run_state,
             run_on_latest_version=run_on_latest_version,
+            keep_task_state=keep_task_state,
         )
 
         session.flush()
@@ -1357,6 +1359,7 @@ class SerializedDAG:
         only_running=False,
         dag_run_state=DagRunState.QUEUED,
         dry_run: bool = False,
+        keep_task_state: bool = False,
     ):
         if dry_run:
             tis = itertools.chain.from_iterable(
@@ -1367,6 +1370,7 @@ class SerializedDAG:
                     only_running=only_running,
                     dag_run_state=dag_run_state,
                     dry_run=True,
+                    keep_task_state=keep_task_state,
                 )
                 for dag in dags
             )
@@ -1380,6 +1384,7 @@ class SerializedDAG:
                 only_running=only_running,
                 dag_run_state=dag_run_state,
                 dry_run=False,
+                keep_task_state=keep_task_state,
             )
             for dag in dags
         )

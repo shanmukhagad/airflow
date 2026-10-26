@@ -287,9 +287,7 @@ def _get_new_task_ids(
     # new_task_ids = set(latest_dag.task_ids) - set(current_dag.task_ids) if current_dag else set()
 
     existing_ti_task_ids = set(
-        session.scalars(
-            select(TaskInstance.task_id).filter_by(dag_id=dag_id, run_id=run_id)
-        ).all()
+        session.scalars(select(TaskInstance.task_id).filter_by(dag_id=dag_id, run_id=run_id)).all()
     )
 
     new_task_ids = set(latest_dag.task_ids) - existing_ti_task_ids
@@ -367,6 +365,7 @@ def clear_task_instances(
     dag_run_state: DagRunState | Literal[False] = DagRunState.QUEUED,
     run_on_latest_version: bool = False,
     prevent_running_task: bool | None = None,
+    keep_task_state: bool = False,
 ) -> None:
     """
     Clear a set of task instances, but make sure the running ones get killed.
@@ -517,6 +516,31 @@ def clear_task_instances(
 
             if dr.created_dag_version_id:
                 _pin_versionless_tis_to_run_version(dr, dr.created_dag_version_id, session)
+    if not keep_task_state and tis:
+        from sqlalchemy import tuple_
+
+        from airflow.models.task_state_store import TaskStateStoreModel
+
+        keys = [
+            (
+                ti.dag_id,
+                ti.run_id,
+                ti.task_id,
+                ti.map_index if ti.map_index is not None else -1,
+            )
+            for ti in tis
+        ]
+        session.execute(
+            delete(TaskStateStoreModel).where(
+                tuple_(
+                    TaskStateStoreModel.dag_id,
+                    TaskStateStoreModel.run_id,
+                    TaskStateStoreModel.task_id,
+                    TaskStateStoreModel.map_index,
+                ).in_(keys)
+            )
+        )
+
     for ti in tis:
         ti.context_carrier = new_task_run_carrier(ti.dag_run.context_carrier)
     session.flush()
