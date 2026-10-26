@@ -276,7 +276,6 @@ class KubernetesPodOperator(BaseOperator):
     POD_CHECKED_KEY = "already_checked"
     POST_TERMINATION_TIMEOUT = 120
     MAX_REDEFER_ATTEMPTS = 3
-    # _POD_PREEMPTION_MAX_ATTEMPTS = 3   # added param
 
     template_fields: Sequence[str] = (
         "image",
@@ -788,7 +787,6 @@ class KubernetesPodOperator(BaseOperator):
                     operator=self,
                 )
 
-            # self.await_pod_start(pod=self.pod) 
             self._await_pod_start_or_relaunch(context)     # added param 
 
             self.await_init_containers_completion(pod=self.pod)
