@@ -278,6 +278,55 @@ class TestOtelMetrics:
 
         assert self.map[full_name(name)].value == 1
 
+    def test_observable_gauge_new_metric(self, name):
+        self.stats.observable_gauge(name, lambda: 1)
+
+        create = self.meter.get_meter().create_observable_gauge
+        create.assert_called_once()
+        assert create.call_args.kwargs["name"] == full_name(name)
+
+    def test_observable_gauge_callback_is_read(self, name):
+        self.stats.observable_gauge(name, lambda: 7, tags={"hello": "world"})
+
+        create = self.meter.get_meter().create_observable_gauge
+        observe = create.call_args.kwargs["callbacks"][0]
+        observations = list(observe(None))
+
+        assert [observation.value for observation in observations] == [7]
+        assert observations[0].attributes == {"hello": "world"}
+
+    def test_observable_gauge_same_name_creates_one_instrument(self, name):
+        self.stats.observable_gauge(name, lambda: 1, tags={"pool": "a"})
+        self.stats.observable_gauge(name, lambda: 2, tags={"pool": "b"})
+
+        create = self.meter.get_meter().create_observable_gauge
+        create.assert_called_once()
+        observe = create.call_args.kwargs["callbacks"][0]
+        values = [(observation.value, observation.attributes["pool"]) for observation in observe(None)]
+        assert values == [(1, "a"), (2, "b")]
+
+    def test_observable_gauge_with_invalid_stat_name_is_skipped(self):
+        self.stats.observable_gauge("test/$tats", lambda: 1)
+
+        self.meter.get_meter().create_observable_gauge.assert_not_called()
+
+    def test_observable_gauge_is_read_by_otel_sdk(self, name):
+        from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        reader = InMemoryMetricReader()
+        stats = SafeOtelLogger(otel_provider=SdkMeterProvider(metric_readers=[reader]))
+        state = {"value": 1}
+        stats.observable_gauge(name, lambda: state["value"])
+
+        def read_values():
+            metric = reader.get_metrics_data().resource_metrics[0].scope_metrics[0].metrics[0]
+            return [point.value for point in metric.data.data_points]
+
+        assert read_values() == [1]
+        state["value"] = 5
+        assert read_values() == [5]
+
     def test_timing_new_metric(self, name):
         import datetime
 

@@ -22,6 +22,8 @@ from collections.abc import Callable
 from functools import wraps
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from .base_stats_logger import read_gauge_callback
+
 from .protocols import Timer
 from .validators import (
     PatternAllowListValidator,
@@ -125,6 +127,19 @@ class SafeStatsdLogger:
         if self.metrics_validator.test(stat):
             return self.statsd.gauge(stat, value, rate, delta)
         return None
+
+    def observable_gauge(
+        self,
+        stat: str,
+        callback: Callable[[], int | float],
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        """Read the callback and send its value as a gauge, StatsD cannot poll on its own."""
+
+        value = read_gauge_callback(stat, callback)
+        if value is not None:
+            self.gauge(stat, value, tags=tags)
 
     @prepare_stat_with_tags
     @validate_stat
