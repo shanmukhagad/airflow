@@ -215,6 +215,90 @@ class TestCliTasks:
             )
         )
 
+    def test_cli_test_with_xcoms(self):
+        """The XCom passed with --xcoms is used by the task instead of the upstream task."""
+        args = self.parser.parse_args(
+            [
+                "tasks",
+                "test",
+                "example_passing_xcoms_via_test_command",
+                "print_message",
+                "--xcoms",
+                '[{"task_id": "get_message", "value": "test message"}]',
+            ]
+        )
+
+        with redirect_stdout(io.StringIO()) as stdout:
+            task_command.task_test(args)
+
+        assert "Received message: test message" in stdout.getvalue()
+
+    def test_cli_test_with_xcoms_and_existing_dag_run(self):
+        """--xcoms is not allowed when an existing DAG run is used."""
+        args = self.parser.parse_args(
+            [
+                "tasks",
+                "test",
+                self.dag_id,
+                "print_the_context",
+                DEFAULT_DATE.isoformat(),
+                "--xcoms",
+                '[{"task_id": "some_task", "value": 1}]',
+            ]
+        )
+
+        with pytest.raises(ValueError, match="--xcoms can only be used"):
+            task_command.task_test(args)
+
+    def test_cli_test_with_valid_xcoms_structure(self):
+        """A list of objects with task_id and value (and an optional key) is accepted."""
+        args = self.parser.parse_args(
+            [
+                "tasks",
+                "test",
+                "example_passing_xcoms_via_test_command",
+                "print_message",
+                "--xcoms",
+                '[{"task_id": "a", "value": {"x": 1}}, {"task_id": "b", "key": "custom", "value": null}]',
+            ]
+        )
+
+        assert args.xcoms == [
+            {"task_id": "a", "value": {"x": 1}},
+            {"task_id": "b", "key": "custom", "value": None},
+        ]
+
+    @pytest.mark.parametrize(
+        ("xcoms", "expected_error"),
+        [
+            ("not json", "must be valid JSON"),
+            ('{"task_id": "a", "value": 1}', "must be a JSON list"),
+            ('["a"]', "item 0 must be a JSON object"),
+            ('[{"value": 1}]', "item 0 needs 'task_id'"),
+            ('[{"task_id": "", "value": 1}]', "item 0 needs 'task_id'"),
+            ('[{"task_id": 1, "value": 1}]', "item 0 needs 'task_id'"),
+            ('[{"task_id": "a"}]', "item 0 needs 'value'"),
+            ('[{"task_id": "a", "key": 1, "value": 1}]', "item 0 'key' must be a string"),
+            ('[{"task_id": "a", "value": 1, "other": 2}]', "item 0 has unexpected keys"),
+            ('[{"task_id": "a", "value": 1}, {"value": 2}]', "item 1 needs 'task_id'"),
+        ],
+    )
+    def test_cli_test_with_invalid_xcoms(self, xcoms, expected_error, capsys):
+        """Malformed --xcoms input is rejected with a clear message before any task runs."""
+        with pytest.raises(SystemExit):
+            self.parser.parse_args(
+                [
+                    "tasks",
+                    "test",
+                    "example_passing_xcoms_via_test_command",
+                    "print_message",
+                    "--xcoms",
+                    xcoms,
+                ]
+            )
+
+        assert expected_error in capsys.readouterr().err
+
     @pytest.mark.parametrize(
         ("env_var_args", "expected_foo"),
         [

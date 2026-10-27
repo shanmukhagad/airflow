@@ -141,6 +141,29 @@ def string_lower_type(val):
     return val.strip().lower()
 
 
+def xcoms_type(val):
+    """Parse and check the JSON given to --xcoms: a list of {"task_id", "value", optional "key"} objects."""
+    try:
+        xcoms = json.loads(val)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"must be valid JSON: {e}") from e
+    if not isinstance(xcoms, list):
+        raise argparse.ArgumentTypeError("must be a JSON list of objects")
+    for index, xcom in enumerate(xcoms):
+        if not isinstance(xcom, dict):
+            raise argparse.ArgumentTypeError(f"item {index} must be a JSON object")
+        if not isinstance(xcom.get("task_id"), str) or not xcom["task_id"]:
+            raise argparse.ArgumentTypeError(f"item {index} needs 'task_id' as a non-empty string")
+        if "value" not in xcom:
+            raise argparse.ArgumentTypeError(f"item {index} needs 'value'")
+        if "key" in xcom and not isinstance(xcom["key"], str):
+            raise argparse.ArgumentTypeError(f"item {index} 'key' must be a string")
+        unexpected = sorted(set(xcom) - {"task_id", "key", "value"})
+        if unexpected:
+            raise argparse.ArgumentTypeError(f"item {index} has unexpected keys: {unexpected}")
+    return xcoms
+
+
 # Shared
 ARG_DAG_ID = Arg(("dag_id",), help="The id of the dag")
 ARG_TASK_ID = Arg(("task_id",), help="The id of the task")
@@ -836,6 +859,15 @@ ARG_ENV_VARS = Arg(
     type=json.loads,
 )
 
+ARG_XCOMS = Arg(
+    ("--xcoms",),
+    help=(
+        "Sends a JSON list of XCom values to the task, as if upstream tasks pushed them. "
+        "Each item needs 'task_id' and 'value'; 'key' is optional (default: return_value)"
+    ),
+    type=xcoms_type,
+)
+
 # connections
 ARG_CONN_ID = Arg(("conn_id",), help="Connection id, required to get/add/delete/test a connection", type=str)
 ARG_CONN_URI = Arg(
@@ -1529,6 +1561,7 @@ TASKS_COMMANDS = (
             ARG_TASK_PARAMS,
             ARG_POST_MORTEM,
             ARG_ENV_VARS,
+            ARG_XCOMS,
             ARG_MAP_INDEX,
             ARG_VERBOSE,
         ),
