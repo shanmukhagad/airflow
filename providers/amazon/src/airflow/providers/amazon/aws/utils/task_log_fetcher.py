@@ -97,6 +97,7 @@ class AwsTaskLogFetcher(Thread):
         self.log_group = log_group
         self.log_stream_name = log_stream_name
         self.on_log_event = on_log_event
+        self._prev_timestamp_event = None
 
         self.hook = AwsLogsHook(aws_conn_id=aws_conn_id, region_name=region_name)
 
@@ -111,7 +112,7 @@ class AwsTaskLogFetcher(Thread):
         self._forward_log_events(continuation_token)
 
     def _forward_log_events(self, continuation_token: AwsLogsHook.ContinuationToken) -> None:
-        prev_timestamp_event = None
+        prev_timestamp_event = self._prev_timestamp_event
         for log_event in self._get_log_events(continuation_token):
             current_timestamp_event = datetime.fromtimestamp(log_event["timestamp"] / 1000.0, tz=timezone.utc)
             if current_timestamp_event == prev_timestamp_event:
@@ -137,7 +138,9 @@ class AwsTaskLogFetcher(Thread):
 
             prev_timestamp_event = current_timestamp_event
 
-    def _get_log_events(self, skip_token: AwsLogsHook.ContinuationToken | None = None) -> Generator:
+        self._prev_timestamp_event = prev_timestamp_event
+
+    def _get_log_events(self, skip_token: AwsLogsHook.ContinuationToken | None = None) -> Generator[dict[str, Any], None, None]:
         if skip_token is None:
             skip_token = AwsLogsHook.ContinuationToken()
         try:
@@ -167,7 +170,7 @@ class AwsTaskLogFetcher(Thread):
         message = event["message"]
         return f"[{formatted_event_dt}] {message}"
 
-    def get_last_log_messages(self, number_messages) -> list:
+    def get_last_log_messages(self, number_messages) -> list[str]:
         """
         Get the last logs messages in one single request.
 
