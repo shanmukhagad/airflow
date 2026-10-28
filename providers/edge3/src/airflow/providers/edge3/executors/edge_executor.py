@@ -36,7 +36,7 @@ from airflow.providers.edge3.models.edge_worker import EdgeWorkerModel, EdgeWork
 from airflow.providers.edge3.models.types import is_callback_execute
 from airflow.utils.db import DBLocks, create_global_lock
 from airflow.utils.session import NEW_SESSION, provide_session
-from airflow.utils.state import TaskInstanceState
+from airflow.sdk import TaskInstanceState
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -252,7 +252,7 @@ class EdgeExecutor(BaseExecutor):
                     "dag_id": job.dag_id,
                     "task_id": job.task_id,
                     "queue": job.queue,
-                    "state": str(TaskInstanceState.FAILED),
+                    "state": TaskInstanceState.FAILED,
                 }
                 Stats.incr("edge_worker.ti.finish", tags=tags)
 

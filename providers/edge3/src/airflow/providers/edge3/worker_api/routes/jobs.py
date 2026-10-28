@@ -36,7 +36,7 @@ from airflow.providers.edge3.worker_api.datamodels import (
     WorkerApiDocs,
     WorkerQueuesBody,
 )
-from airflow.utils.state import TaskInstanceState
+from airflow.sdk import TaskInstanceState
 
 if TYPE_CHECKING:
     from airflow.providers.edge3.models.types import ExecuteTypeBody
