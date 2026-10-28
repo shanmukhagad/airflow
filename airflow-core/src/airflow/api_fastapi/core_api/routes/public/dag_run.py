@@ -345,6 +345,7 @@ def clear_dag_run(
         run_on_latest_version=body.run_on_latest_version,
         note=body.note,
         user=user,
+        keep_task_state=body.keep_task_state,
     )
 
 
@@ -448,6 +449,7 @@ def clear_dag_runs(
                 run_on_latest_version=body.run_on_latest_version,
                 note=body.note,
                 user=user,
+                keep_task_state=body.keep_task_state,
             )
         )
     return DAGRunCollectionResponse(

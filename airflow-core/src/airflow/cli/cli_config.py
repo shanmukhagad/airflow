@@ -520,6 +520,11 @@ ARG_DOWNSTREAM = Arg(("-d", "--downstream"), help="Include downstream tasks", ac
 ARG_DAG_REGEX = Arg(
     ("-R", "--dag-regex"), help="Search dag_id as regex instead of exact string", action="store_true"
 )
+ARG_KEEP_TASK_STATE = Arg(
+    ("--keep-task-state",),
+    help="Preserve task state store entries when clearing tasks.",
+    action="store_true",
+)
 
 # show_dag
 ARG_SAVE = Arg(("-s", "--save"), help="Saves the result to the indicated file.")
@@ -1254,6 +1259,7 @@ DAGS_COMMANDS = (
             ARG_ONLY_RUNNING,
             ARG_YES,
             ARG_VERBOSE,
+            ARG_KEEP_TASK_STATE,
         ),
     ),
     ActionCommand(
@@ -1499,6 +1505,7 @@ TASKS_COMMANDS = (
             ARG_ONLY_RUNNING,
             ARG_DAG_REGEX,
             ARG_VERBOSE,
+            ARG_KEEP_TASK_STATE,
         ),
     ),
     ActionCommand(
