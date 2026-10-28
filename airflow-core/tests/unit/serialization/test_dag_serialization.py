@@ -1712,6 +1712,66 @@ class TestStringifiedDAGs:
         serialized_op = OperatorSerialization.deserialize_operator(blob)
         assert serialized_op.downstream_task_ids == {"foo"}
 
+    def test_schema_extra_links_matches_serializer_output(self):
+        import jsonschema
+
+        validator = jsonschema.Draft7Validator(load_dag_schema_dict()["definitions"]["extra_links"])
+        validator.validate({"Google Custom": "_link_CustomOpLink"})
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate([{"Google Custom": "_link_CustomOpLink"}])
+
+    def test_schema_retry_exponential_backoff_accepts_bool_and_number(self):
+        import jsonschema
+
+        prop = load_dag_schema_dict()["definitions"]["operator"]["properties"]["retry_exponential_backoff"]
+        validator = jsonschema.Draft7Validator(prop)
+        for ok in (True, False, 0, 2.0):
+            validator.validate(ok)
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate("yes")
+
+    def test_schema_dependencies_accept_mapped_tasks(self):
+        import jsonschema
+
+        from airflow.providers.standard.operators.bash import BashOperator
+        from airflow.sdk import task
+
+        @task
+        def add_one(x):
+            return x + 1
+
+        with DAG("test_schema_mapped", schedule=None, start_date=datetime(2024, 1, 1)) as dag:
+            BashOperator.partial(task_id="classic").expand(bash_command=["a", "b"])
+            add_one.expand(x=[1, 2])
+
+        defs = load_dag_schema_dict()["definitions"]
+        validator = jsonschema.Draft7Validator({"dependencies": defs["operator"]["dependencies"]})
+        tasks = DagSerialization.to_dict(dag)["dag"]["tasks"]
+        assert len(tasks) == 2
+        for t in tasks:
+            validator.validate(t["__var"])
+
+    @pytest.mark.parametrize("missing_key", ["_is_mapped", "partial_kwargs"])
+    def test_schema_dependencies_reject_unpaired_mapped_keys(self, missing_key):
+        import copy
+
+        import jsonschema
+
+        from airflow.providers.standard.operators.bash import BashOperator
+
+        with DAG("test_schema_mapped_negative", schedule=None, start_date=datetime(2024, 1, 1)) as dag:
+            BashOperator.partial(task_id="classic").expand(bash_command=["a", "b"])
+
+        defs = load_dag_schema_dict()["definitions"]
+        validator = jsonschema.Draft7Validator({"dependencies": defs["operator"]["dependencies"]})
+        task_var = DagSerialization.to_dict(dag)["dag"]["tasks"][0]["__var"]
+        validator.validate(task_var)  # control: the real mapped task is valid
+
+        broken = copy.deepcopy(task_var)
+        del broken[missing_key]
+        with pytest.raises(jsonschema.ValidationError, match="is a dependency of"):
+            validator.validate(broken)
+
     def test_task_resources(self):
         """
         Test task resources serialization/deserialization.

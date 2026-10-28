@@ -29,6 +29,7 @@ from kubernetes.client import models as k8s
 from kubernetes.client.rest import ApiException
 from sqlalchemy import inspect
 from urllib3 import HTTPResponse
+from unittest.mock import MagicMock, patch
 
 from airflow.jobs.job import Job
 from airflow.models.taskinstancekey import TaskInstanceKey
@@ -324,6 +325,44 @@ class TestKubernetesExecutor:
         self.kubernetes_executor = KubernetesExecutor()
         self.kubernetes_executor.job_id = 5
         self.kubernetes_executor._last_completed_pod_adoption = time.monotonic()
+
+    @patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure")
+    def test_change_state_infrastructure_failure_requeues(self, mock_is_pre_exec):
+        key = TaskInstanceKey("dag_id", "task_id", "run_id", 1)
+        results = KubernetesResults(
+            key=key,
+            state=TaskInstanceState.FAILED,
+            pod_name="test-pod",
+            namespace="default",
+            resource_version="123",
+            failure_details={"pod_reason": "Evicted", "container_reason": "Evicted"},
+        )
+        mock_is_pre_exec.return_value = True
+        self.kubernetes_executor.running.add(key)
+
+        self.kubernetes_executor._change_state(results)
+
+        assert key in self.kubernetes_executor.event_buffer
+        state, reason = self.kubernetes_executor.event_buffer[key]
+        assert state == TaskInstanceState.QUEUED
+        assert "Infrastructure failure" in reason
+
+    @patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure")
+    def test_change_state_none_pod_reason_requeues(self,mock_is_pre_exec):
+        """Test that missing or None pod_reason is handled safely without throwing AttributeError."""
+        key = TaskInstanceKey("dag_id", "task_id", "run_id", 1)
+        results = KubernetesResults(
+            key=key,
+            state=TaskInstanceState.FAILED,
+            pod_name="test-pod",
+            namespace="default",
+            resource_version="123",
+            failure_details=None,
+        )
+        mock_is_pre_exec.return_value = True
+        self.kubernetes_executor.running.add(key)
+        self.kubernetes_executor._change_state(results)
+        assert key in self.kubernetes_executor.event_buffer
 
     def test_resource_version_singleton(self):
         """Test that ResourceVersion returns the same instance."""

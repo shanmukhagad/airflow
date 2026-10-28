@@ -22,6 +22,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from .base_stats_logger import read_gauge_callback
+
 from .protocols import Timer
 from .validators import (
     PatternAllowListValidator,
@@ -118,6 +120,18 @@ class SafeDogStatsdLogger:
         if self.metrics_validator.test(stat):
             return self.dogstatsd.gauge(metric=stat, value=value, tags=tags_list, sample_rate=rate)
         return None
+
+    def observable_gauge(
+        self,
+        stat: str,
+        callback: Callable[[], int | float],
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> None:
+        """Read the callback and send its value as a gauge, DogStatsD cannot poll on its own."""
+        value = read_gauge_callback(stat, callback)
+        if value is not None:
+            self.gauge(stat, value, tags=tags)
 
     @validate_stat
     def timing(

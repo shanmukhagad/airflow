@@ -231,6 +231,20 @@ def gauge(
     backend.gauge(stat, value, **_defined(rate=rate, delta=delta, tags=tags))
 
 
+def observable_gauge(
+    stat: str,
+    callback: Callable[[], int | float],
+    *,
+    tags: dict[str, Any] | None = None,
+) -> None:
+    """Register a gauge."""
+    backend = _get_backend()
+    legacy_name, extra_tags = _get_legacy_stat_name_and_tags(stat, tags)
+    if legacy_name is not None:
+        backend.observable_gauge(legacy_name, callback, **_defined(tags=extra_tags))
+    backend.observable_gauge(stat, callback, **_defined(tags=tags))
+
+
 def timing(
     stat: str,
     dt: DeltaType,
@@ -325,5 +339,6 @@ class Stats:
     incr = staticmethod(incr)
     decr = staticmethod(decr)
     gauge = staticmethod(gauge)
+    observable_gauge = staticmethod(observable_gauge)
     timing = staticmethod(timing)
     timer = staticmethod(timer)

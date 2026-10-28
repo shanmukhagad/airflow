@@ -28,6 +28,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from airflow.sdk import ResumableJobMixin
 from airflow.sdk.bases.operator import BaseOperator
+from airflow.sdk.bases.resumablejobmixin import ReconnectDecisionStatus
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -139,6 +140,20 @@ class TestFirstSubmission:
 
 
 class TestRetryWithDifferentJobStatuses:
+    def test_reconnect_returns_get_job_result(self):
+        """Verify reconnecting calls get_job_result after poll_until_complete."""
+        op = ConcreteResumableOperator(task_id="test_task")
+        op._status_map["job-001"] = "RUNNING"
+        op.get_job_result = mock.MagicMock(return_value={"reconnect": "success"})
+        task_state = FakeTaskState({"test_job_id": "job-001"})
+        ctx = make_context(task_state)
+
+        result = op.execute_resumable(ctx)
+
+        assert op.polled_ids == ["job-001"]
+        op.get_job_result.assert_called_once_with("job-001", ctx)
+        assert result == {"reconnect": "success"}
+
     def test_skips_submission_when_job_active(self):
         op = ConcreteResumableOperator(task_id="test_task")
         op._status_map["job-001"] = "RUNNING"
@@ -554,3 +569,104 @@ class TestAbstractMethodEnforcement:
         assert partial_cls.__abstractmethods__ == frozenset({missing_method})
         with pytest.raises(TypeError):
             partial_cls(task_id="test_task")
+
+
+class TestGetReconnectDecisionDirect:
+    """Direct tests for get_reconnect_decision method."""
+
+    def test_decision_fresh_submit_when_no_stored_id(self):
+        op = ConcreteResumableOperator(task_id="test_task")
+        decision = op.get_reconnect_decision(make_context(FakeTaskState()))
+        assert decision.status == ReconnectDecisionStatus.FRESH_SUBMIT
+        assert decision.external_id is None
+
+    def test_decision_reconnect_when_job_active(self):
+        op = ConcreteResumableOperator(task_id="test_task")
+        op._status_map["job-001"] = "RUNNING"
+        ctx = make_context(FakeTaskState({"test_job_id": "job-001"}))
+        decision = op.get_reconnect_decision(ctx)
+        assert decision.status == ReconnectDecisionStatus.RECONNECT
+        assert decision.external_id == "job-001"
+        assert decision.prior_status == "RUNNING"
+
+    def test_decision_already_succeeded_when_job_completed(self):
+        op = ConcreteResumableOperator(task_id="test_task")
+        op._status_map["job-001"] = "SUCCEEDED"
+        ctx = make_context(FakeTaskState({"test_job_id": "job-001"}))
+        decision = op.get_reconnect_decision(ctx)
+        assert decision.status == ReconnectDecisionStatus.ALREADY_SUCCEEDED
+        assert decision.external_id == "job-001"
+        assert decision.prior_status == "SUCCEEDED"
+
+    def test_decision_terminal_resubmit_when_job_failed(self):
+        op = ConcreteResumableOperator(task_id="test_task")
+        op._status_map["job-001"] = "FAILED"
+        ctx = make_context(FakeTaskState({"test_job_id": "job-001"}))
+        decision = op.get_reconnect_decision(ctx)
+        assert decision.status == ReconnectDecisionStatus.TERMINAL_RESUBMIT
+        assert decision.external_id == "job-001"
+        assert decision.prior_status == "FAILED"
+
+class TestGetReconnectDecisionEdgeCases:
+    """Rigorous edge-case and boundary testing for get_reconnect_decision."""
+
+    def test_durable_false_returns_fresh_submit_without_accessing_store(self):
+        """Verify durable=False returns FRESH_SUBMIT without querying task_state_store."""
+        op = ConcreteResumableOperator(task_id="test_task", durable=False)
+        mock_store = MagicMock()
+        ctx = make_context(mock_store)
+
+        decision = op.get_reconnect_decision(ctx)
+
+        assert decision.status == ReconnectDecisionStatus.FRESH_SUBMIT
+        assert decision.external_id is None
+        mock_store.get.assert_not_called()
+
+    def test_missing_task_state_store_returns_no_store_status(self):
+        """Verify context without task_state_store returns NO_TASK_STATE_STORE."""
+        op = ConcreteResumableOperator(task_id="test_task")
+        ctx = make_context(task_store=None)
+
+        decision = op.get_reconnect_decision(ctx)
+
+        assert decision.status == ReconnectDecisionStatus.NO_TASK_STATE_STORE
+        assert decision.external_id is None
+
+    @pytest.mark.parametrize("empty_value", ["", None])
+    def test_empty_or_none_stored_id_returns_fresh_submit(self, empty_value):
+        """Verify empty string or None in task_state_store triggers FRESH_SUBMIT."""
+        op = ConcreteResumableOperator(task_id="test_task")
+        task_state = FakeTaskState({"test_job_id": empty_value})
+        ctx = make_context(task_state)
+
+        decision = op.get_reconnect_decision(ctx)
+
+        assert decision.status == ReconnectDecisionStatus.FRESH_SUBMIT
+        assert decision.external_id is None
+
+    def test_complex_json_external_id_preserves_type(self):
+        """Verify dict/structured JSON external IDs are preserved in ReconnectDecision."""
+        op = ConcreteResumableOperator(task_id="test_task")
+        complex_id = {"cluster_id": "c-123", "job_id": "j-456"}
+        op._status_map[str(complex_id)] = "RUNNING"
+        task_state = FakeTaskState({"test_job_id": complex_id})
+        ctx = make_context(task_state)
+
+        decision = op.get_reconnect_decision(ctx)
+
+        assert decision.status == ReconnectDecisionStatus.RECONNECT
+        assert decision.external_id == complex_id
+
+    def test_get_job_status_exception_bubbles_up_cleanly(self):
+        """Verify external API exceptions during get_job_status are raised without state corruption."""
+        op = ConcreteResumableOperator(task_id="test_task")
+
+        def error_status(ext_id, ctx):
+            raise RuntimeError("Cloud API Connection Timeout")
+
+        op.get_job_status = error_status
+        task_state = FakeTaskState({"test_job_id": "job-001"})
+        ctx = make_context(task_state)
+
+        with pytest.raises(RuntimeError, match="Cloud API Connection Timeout"):
+            op.get_reconnect_decision(ctx)

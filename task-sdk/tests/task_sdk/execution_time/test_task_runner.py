@@ -4732,6 +4732,66 @@ class TestTaskRunnerCallsListeners:
         assert listener.state == [TaskInstanceState.RUNNING, TaskInstanceState.FAILED]
         assert listener.error == error
 
+    def _finalize_with_retry_listener(self, listener_manager, state):
+        class RetryListener:
+            def __init__(self):
+                self.events = []
+                self.errors = {}
+
+            @hookimpl
+            def on_task_instance_failed(self, previous_state, task_instance, error):
+                self.events.append("failed")
+                self.errors["failed"] = error
+
+            @hookimpl
+            def on_task_instance_up_for_retry(self, previous_state, task_instance, error):
+                self.events.append("up_for_retry")
+                self.errors["up_for_retry"] = error
+
+        listener = RetryListener()
+        listener_manager(listener)
+
+        class CustomOperator(BaseOperator):
+            def execute(self, context): ...
+
+        task = CustomOperator(task_id="test_up_for_retry_listener", retries=1)
+        dag = get_inline_dag(dag_id="test_dag", task=task)
+        ti = TaskInstance(
+            id=uuid7(),
+            task_id=task.task_id,
+            dag_id=dag.dag_id,
+            run_id="test_run",
+            try_number=1,
+            dag_version_id=uuid7(),
+        )
+        runtime_ti = RuntimeTaskInstance.model_construct(
+            **ti.model_dump(exclude_unset=True), task=task, start_date=timezone.utcnow()
+        )
+        log = mock.MagicMock()
+        context = runtime_ti.get_template_context()
+        error = ValueError("boom")
+        finalize(runtime_ti, state, context, log, error)
+        return listener, error
+
+    def test_task_runner_calls_up_for_retry_listener_on_retry(
+        self, mocked_parse, mock_supervisor_comms, listener_manager
+    ):
+        listener, error = self._finalize_with_retry_listener(
+            listener_manager, TaskInstanceState.UP_FOR_RETRY
+        )
+
+        assert listener.events == ["failed", "up_for_retry"]
+        assert listener.errors["up_for_retry"] is error
+        assert str(listener.errors["up_for_retry"]) == "boom"
+
+    def test_task_runner_does_not_call_up_for_retry_listener_on_terminal_failure(
+        self, mocked_parse, mock_supervisor_comms, listener_manager
+    ):
+        listener, error = self._finalize_with_retry_listener(listener_manager, TaskInstanceState.FAILED)
+
+        assert listener.events == ["failed"]
+        assert listener.errors["failed"] is error
+
     def test_task_runner_calls_listeners_skipped(self, mocked_parse, mock_supervisor_comms, listener_manager):
         listener = self.CustomListener()
         listener_manager(listener)
@@ -6691,3 +6751,50 @@ class TestRegisterDeserializationAllowedClasses:
         with patch("airflow.sdk.execution_time.task_runner.allow_class", side_effect=ValueError("nope")):
             # Must not raise -- the walk swallows per-class registration errors.
             _register_deserialization_allowed_classes(dag, structlog.get_logger())
+
+
+
+def test_on_term_calls_on_kill_and_raises_terminated(create_runtime_ti):
+    """Verify that _on_term signal handler executes on_kill and raises AirflowTaskTerminated."""
+    import signal
+    from airflow.sdk.bases.operator import BaseOperator
+    from airflow.sdk.execution_time import task_runner
+    from airflow.utils.state import TaskInstanceState
+
+    captured_handler = None
+
+    class MockKillOperator(BaseOperator):
+        was_killed = False
+
+        def execute(self, context):
+            assert captured_handler is not None, "SIGTERM handler was not registered"
+            captured_handler(signal.SIGTERM, None)
+
+        def on_kill(self):
+            MockKillOperator.was_killed = True
+
+    op = MockKillOperator(task_id="test_kpo_task")
+    runtime_ti = create_runtime_ti(task=op)
+
+    def fake_signal(sig, handler):
+        nonlocal captured_handler
+        if sig == signal.SIGTERM:
+            captured_handler = handler
+
+    with mock.patch("signal.signal", side_effect=fake_signal):
+        msg, final_state, error = task_runner._run_task_and_map_outcome(
+            ti=runtime_ti,
+            log=mock.MagicMock(),
+            context=mock.MagicMock(),
+        )
+
+    # 1. Verify on_kill() was executed on the task
+    assert MockKillOperator.was_killed is True
+
+    # 2. Verify task transitioned to FAILED instead of false SUCCESS
+    if hasattr(final_state, "state"):
+        assert final_state.state == TaskInstanceState.FAILED
+    else:
+        assert final_state == TaskInstanceState.FAILED
+
+    assert isinstance(error, task_runner.AirflowTaskTerminated)

@@ -24,11 +24,14 @@ from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, ClassVar
 
 from airflow.models.dag import DagModel
+from airflow.models.dag_version import DagVersion
+from airflow.utils.session import create_session
 from airflow.providers.common.compat.sdk import (
     AirflowSkipException,
     BaseOperatorLink,
     BaseSensorOperator,
     conf,
+    timezone,
 )
 from airflow.providers.standard.exceptions import (
     DuplicateStateError,
@@ -156,16 +159,21 @@ class ExternalTaskSensor(BaseSensorOperator):
     :param allowed_states: Iterable of allowed states, default is ``['success']``
     :param skipped_states: Iterable of states to make this task mark as skipped, default is ``None``
     :param failed_states: Iterable of failed or dis-allowed states, default is ``None``
+    :param logical_date: The logical date, or list of logical dates, of the external Dag runs
+        to wait for, as ISO 8601 strings or datetimes. (templated)
+        For example, ``"{{ logical_date - macros.timedelta(days=1) }}"`` waits for yesterday's run.
+        Only one of logical_date, execution_delta or execution_date_fn can be passed to
+        ExternalTaskSensor.
     :param execution_delta: time difference with the previous execution to
         look at, the default is the same logical date as the current task or DAG.
-        For yesterday, use [positive!] datetime.timedelta(days=1). Either
-        execution_delta or execution_date_fn can be passed to
-        ExternalTaskSensor, but not both.
+        For yesterday, use [positive!] datetime.timedelta(days=1).
+        Only one of logical_date, execution_delta or execution_date_fn can be passed to
+        ExternalTaskSensor.
     :param execution_date_fn: function that receives the current execution's logical date as the first
         positional argument and optionally any number of keyword arguments available in the
         context dictionary, and returns the desired logical dates to query.
-        Either execution_delta or execution_date_fn can be passed to ExternalTaskSensor,
-        but not both.
+        Only one of logical_date, execution_delta or execution_date_fn can be passed to
+        ExternalTaskSensor.
     :param check_existence: Set to `True` to check if the external task exists (when
         external_task_id is not None) or check if the DAG to wait for exists (when
         external_task_id is None), and immediately cease waiting if the external task
@@ -174,7 +182,13 @@ class ExternalTaskSensor(BaseSensorOperator):
     :param deferrable: Run sensor in deferrable mode
     """
 
-    template_fields = ["external_dag_id", "external_task_id", "external_task_ids", "external_task_group_id"]
+    template_fields = [
+        "external_dag_id",
+        "external_task_id",
+        "external_task_ids",
+        "external_task_group_id",
+        "logical_date",
+    ]
     ui_color = "#4db7db"
     operator_extra_links = [ExternalDagLink()]
 
@@ -188,6 +202,7 @@ class ExternalTaskSensor(BaseSensorOperator):
         allowed_states: Iterable[str] | None = None,
         skipped_states: Iterable[str] | None = None,
         failed_states: Iterable[str] | None = None,
+        logical_date: str | datetime.datetime | list[str | datetime.datetime] | None = None,
         execution_delta: datetime.timedelta | None = None,
         execution_date_fn: Callable | None = None,
         check_existence: bool = False,
@@ -248,12 +263,13 @@ class ExternalTaskSensor(BaseSensorOperator):
                 f"when `external_task_id` and `external_task_group_id` is `None`: {State.dag_states}"
             )
 
-        if execution_delta is not None and execution_date_fn is not None:
+        if sum(arg is not None for arg in (logical_date, execution_delta, execution_date_fn)) > 1:
             raise ValueError(
-                "Only one of `execution_delta` or `execution_date_fn` may "
-                "be provided to ExternalTaskSensor; not both."
+                "Only one of `logical_date`, `execution_delta` or `execution_date_fn` may "
+                "be provided to ExternalTaskSensor."
             )
 
+        self.logical_date = logical_date
         self.execution_delta = execution_delta
         self.execution_date_fn = execution_date_fn
         self.external_dag_id = external_dag_id
@@ -267,6 +283,16 @@ class ExternalTaskSensor(BaseSensorOperator):
         self.external_dates_filter: str | None = None
 
     def _get_dttm_filter(self, context: Context) -> Sequence[datetime.datetime]:
+        if self.logical_date is not None:
+            # Validated here rather than in __init__ so templates and XComArgs are rendered first.
+            logical_dates = self.logical_date if isinstance(self.logical_date, list) else [self.logical_date]
+            if not logical_dates or not all(isinstance(dt, (str, datetime.datetime)) for dt in logical_dates):
+                raise TypeError(
+                    "Expected str, datetime.datetime or a non-empty list of those for `logical_date`. "
+                    f"Got {self.logical_date!r}"
+                )
+            return [timezone.parse(dt) if isinstance(dt, str) else dt for dt in logical_dates]
+
         logical_date = self._get_logical_date(context)
 
         if self.execution_delta:
@@ -319,9 +345,12 @@ class ExternalTaskSensor(BaseSensorOperator):
 
     def _poke_af3(self, context: Context, dttm_filter: Sequence[datetime.datetime]) -> bool:
         from airflow.providers.standard.utils.sensor_helper import _get_count_by_matched_states
-
-        self._has_checked_existence = True
+        
         ti = context["ti"]
+
+        if self.check_existence and not self._has_checked_existence:
+            with create_session() as session:
+                self._check_for_existence(session=session)
 
         def _get_count(states: list[str]) -> int:
             if self.external_task_ids:
@@ -511,37 +540,31 @@ class ExternalTaskSensor(BaseSensorOperator):
             )
 
     def _check_for_existence(self, session: Session) -> None:
-        dag_to_wait = DagModel.get_current(self.external_dag_id, session=session)
-
-        if not dag_to_wait:
-            raise ExternalDagNotFoundError(f"The external DAG {self.external_dag_id} does not exist.")
-
-        path = correct_maybe_zipped(dag_to_wait.fileloc)
-        if not path or not os.path.exists(path):
-            raise ExternalDagDeletedError(f"The external DAG {self.external_dag_id} was deleted.")
 
         if self.external_task_ids:
-            refreshed_dag_info = DagBag(dag_to_wait.fileloc).get_dag(self.external_dag_id)
-            if not refreshed_dag_info:
+            dag_version = DagVersion.get_latest_version(self.external_dag_id, session=session)
+            if not dag_version or not dag_version.serialized_dag:
                 raise ExternalDagNotFoundError(
-                    f"The external DAG {self.external_dag_id} could not be loaded."
+                    f"The external DAG {self.external_dag_id} could not be loaded"
                 )
+            serialized_dag = dag_version.serialized_dag.dag
             for external_task_id in self.external_task_ids:
-                if not refreshed_dag_info.has_task(external_task_id):
-                    raise ExternalTaskNotFoundError(
-                        f"The external task {external_task_id} in DAG {self.external_dag_id} does not exist."
+                if not serialized_dag.has_task(external_task_id):
+                    raise ExternalTaskNotFoundError (
+                        f"The external task {external_task_id} in DAG {self.external_dag_id} does not exist"
                     )
 
         if self.external_task_group_id:
-            refreshed_dag_info = DagBag(dag_to_wait.fileloc).get_dag(self.external_dag_id)
-            if not refreshed_dag_info:
+            dag_version = DagVersion.get_latest_version(self.external_dag_id, session=session)
+            if not dag_version or not dag_version.serialized_dag:
                 raise ExternalDagNotFoundError(
-                    f"The external DAG {self.external_dag_id} could not be loaded."
+                    f"The external DAG {self.external_dag_id} could not be loaded"
                 )
-            if not refreshed_dag_info.has_task_group(self.external_task_group_id):
-                raise ExternalTaskGroupNotFoundError(
+            serialized_dag = dag_version.serialized_dag.dag
+            if self.external_task_group_id not in serialized_dag.task_group_dict:
+                raise ExternalTaskGroupNotFoundError (
                     f"The external task group '{self.external_task_group_id}' in "
-                    f"DAG '{self.external_dag_id}' does not exist."
+                    f"DAG '{self.external_dag_id}' does not exist"
                 )
 
         self._has_checked_existence = True

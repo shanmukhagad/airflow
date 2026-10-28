@@ -287,9 +287,7 @@ def _get_new_task_ids(
     # new_task_ids = set(latest_dag.task_ids) - set(current_dag.task_ids) if current_dag else set()
 
     existing_ti_task_ids = set(
-        session.scalars(
-            select(TaskInstance.task_id).filter_by(dag_id=dag_id, run_id=run_id)
-        ).all()
+        session.scalars(select(TaskInstance.task_id).filter_by(dag_id=dag_id, run_id=run_id)).all()
     )
 
     new_task_ids = set(latest_dag.task_ids) - existing_ti_task_ids
@@ -367,6 +365,7 @@ def clear_task_instances(
     dag_run_state: DagRunState | Literal[False] = DagRunState.QUEUED,
     run_on_latest_version: bool = False,
     prevent_running_task: bool | None = None,
+    keep_task_state: bool = False,
 ) -> None:
     """
     Clear a set of task instances, but make sure the running ones get killed.
@@ -517,6 +516,31 @@ def clear_task_instances(
 
             if dr.created_dag_version_id:
                 _pin_versionless_tis_to_run_version(dr, dr.created_dag_version_id, session)
+    if not keep_task_state and tis:
+        from sqlalchemy import tuple_
+
+        from airflow.models.task_state_store import TaskStateStoreModel
+
+        keys = [
+            (
+                ti.dag_id,
+                ti.run_id,
+                ti.task_id,
+                ti.map_index if ti.map_index is not None else -1,
+            )
+            for ti in tis
+        ]
+        session.execute(
+            delete(TaskStateStoreModel).where(
+                tuple_(
+                    TaskStateStoreModel.dag_id,
+                    TaskStateStoreModel.run_id,
+                    TaskStateStoreModel.task_id,
+                    TaskStateStoreModel.map_index,
+                ).in_(keys)
+            )
+        )
+
     for ti in tis:
         ti.context_carrier = new_task_run_carrier(ti.dag_run.context_carrier)
     session.flush()
@@ -1932,6 +1956,14 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         except Exception:
             log.exception("error calling listener")
 
+        if ti.state == TaskInstanceState.UP_FOR_RETRY:
+            try:
+                get_listener_manager().hook.on_task_instance_up_for_retry(
+                    previous_state=TaskInstanceState.RUNNING, task_instance=ti, error=error
+                )
+            except Exception:
+                log.exception("error calling listener")
+
         return ti
 
     @staticmethod
@@ -1957,6 +1989,28 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         :param test_mode: doesn't record success or failure in the DB if True
         :param session: SQLAlchemy ORM Session
         """
+        try:
+            if error and "Infrastructure failure" in str(error):
+                self.log.info(
+                    "TaskInstance %s experienced an infrastructure failure (%s). "
+                    "Re-queuing without consuming application retry attempt.",
+                    self,
+                    error,
+                )
+                try:
+                    if self.try_number > 0:
+                        self.try_number -= 1
+                    self.state = TaskInstanceState.QUEUED
+                    session.merge(self)
+                    session.commit()
+                except Exception as db_exc:
+                    self.log.exception("Failed to update TaskInstance state for infrastructure failure retry: %s", db_exc)
+                    session.rollback()
+                    raise
+                return
+        except Exception as outer_exc:
+            self.log.warning("Error checking infrastructure failure in handle_failure: %s", outer_exc)
+        
         if TYPE_CHECKING:
             assert self.task
             assert self.task.dag

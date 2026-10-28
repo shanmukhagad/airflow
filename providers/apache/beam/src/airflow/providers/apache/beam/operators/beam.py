@@ -144,6 +144,19 @@ class BeamDataflowMixin(metaclass=ABCMeta):
         )
         return pipeline_options
 
+    def _set_dataflow_job_id_by_name(self, job_name: str | None) -> None:
+        """Find the Dataflow job id by job name when it was not found in the Beam launcher output."""
+        if self.dataflow_job_id or not job_name or not self.dataflow_hook:
+            return
+        if not self.dataflow_config.append_job_name:
+            return
+
+        self.dataflow_job_id = self.dataflow_hook.fetch_job_id_by_name(
+            job_name=job_name,
+            project_id=self.dataflow_config.project_id,
+            location=self.dataflow_config.location or DEFAULT_DATAFLOW_LOCATION,
+        )
+
     def __get_dataflow_process_callback(self) -> Callable[[str], None]:
         def set_current_dataflow_job_id(job_id):
             self.dataflow_job_id = job_id
@@ -460,6 +473,9 @@ class BeamRunPythonPipelineOperator(BeamBasePipelineOperator):
         )
 
         location = self.dataflow_config.location or DEFAULT_DATAFLOW_LOCATION
+        if self.deferrable:
+            self._set_dataflow_job_id_by_name(self.dataflow_job_name)
+
         DataflowJobLink.persist(
             context=context,
             region=self.dataflow_config.location,
@@ -655,6 +671,9 @@ class BeamRunJavaPipelineOperator(BeamBasePipelineOperator):
                 is_dataflow_job_id_exist_callback=self.is_dataflow_job_id_exist_callback,
             )
             if self.dataflow_job_name and self.dataflow_config.location:
+                if self.deferrable:
+                    self._set_dataflow_job_id_by_name(self.dataflow_job_name)
+
                 DataflowJobLink.persist(
                     context=context,
                     region=self.dataflow_config.location,
