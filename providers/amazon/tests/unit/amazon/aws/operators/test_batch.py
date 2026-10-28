@@ -604,6 +604,32 @@ class TestBatchOperator:
         with pytest.raises(AirflowException, match="Error while running job"):
             batch.execute_complete(context={}, event={"dummy": "event"})
 
+    @patch("airflow.providers.amazon.aws.operators.batch.AwsTaskLogFetcher")
+    @patch.object(BatchClientHook, "get_job_awslogs_info")
+    def test_get_batch_log_fetcher_passes_on_log_event(
+        self, mock_get_job_awslogs_info, mock_log_fetcher
+    ):
+        callback = mock.Mock()
+        mock_get_job_awslogs_info.return_value = {
+            "awslogs_region": "us-east-1",
+            "awslogs_group": "/aws/batch/job",
+            "awslogs_stream_name": "stream1",
+        }
+
+        batch = BatchOperator(
+            task_id="test_task",
+            job_name=JOB_NAME,
+            job_queue="dummy_queue",
+            job_definition="dummy_definition",
+            on_log_event=callback,
+        )
+
+        fetcher = batch._get_batch_log_fetcher("job-123")
+
+        assert fetcher is mock_log_fetcher.return_value
+        assert mock_log_fetcher.call_args.kwargs["on_log_event"] is callback
+        assert mock_log_fetcher.call_args.kwargs["logger"] is batch.log
+
 
 class TestBatchCreateComputeEnvironmentOperator:
     warn_message = "The `status_retries` parameter is unused and should be removed"
