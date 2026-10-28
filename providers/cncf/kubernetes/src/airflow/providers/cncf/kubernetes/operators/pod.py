@@ -941,6 +941,7 @@ class KubernetesPodOperator(BaseOperator):
             pod_namespace=self.pod.metadata.namespace,  # type: ignore[union-attr]
             trigger_start_time=trigger_start_time,
             kubernetes_conn_id=self.kubernetes_conn_id,
+            init_container_logs=self.init_container_logs,
             connection_extras=connection_extras,
             cluster_context=self.cluster_context,
             config_dict=self._config_dict,

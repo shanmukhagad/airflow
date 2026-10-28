@@ -3916,3 +3916,39 @@ def test_read_pod_events(mock_log, mock_pod_manager):
         mock_event_error.reason,
         mock_event_error.message,
     )
+
+
+def test_reproduce_init_container_logs_deferrable_bug():
+    """Verify that KubernetesPodOperator passes init_container_logs to KubernetesPodTrigger."""
+    op = KubernetesPodOperator(
+        task_id="test_reproduce_task",
+        name="test-pod",
+        image="alpine",
+        base_container_name="base",
+        init_container_logs=True,
+        deferrable=True,
+    )
+
+    # Set up a dummy Pod so that the defer method can execute
+    op.pod = MagicMock()
+    op.pod.metadata.name = "test-pod"
+    op.pod.metadata.namespace = "default"
+
+    container_mock = MagicMock()
+    container_mock.name = "base"
+    op.pod.status.container_statuses = [container_mock]
+
+    # The defer call should occur and TaskDeferred should be raised
+    with pytest.raises(TaskDeferred) as exc_info:
+        op.invoke_defer_method()
+
+    trigger = exc_info.value.trigger
+
+    # BUG REPRODUCTION ASSERTION:
+    # The trigger is expected to be missing the init_container_logs attribute
+    assert hasattr(trigger, "init_container_logs"), (
+        "BUG CONFIRMED: KubernetesPodTrigger is missing 'init_container_logs'!"
+    )
+    assert trigger.init_container_logs is True, (
+        f"Expected init_container_logs=True, got {trigger.init_container_logs}"
+    )
