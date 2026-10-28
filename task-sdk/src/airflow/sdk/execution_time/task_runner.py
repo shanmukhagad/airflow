@@ -1546,7 +1546,9 @@ def _run_task_and_map_outcome(
         if pid != parent_pid:
             return
 
-        ti.task.on_kill()
+        if ti.task:
+            ti.task.on_kill()
+        raise AirflowTaskTerminated("Task process received SIGTERM")
 
     signal.signal(signal.SIGTERM, _on_term)
 
