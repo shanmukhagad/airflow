@@ -149,30 +149,27 @@ def _base_container_may_have_run(pod: V1Pod, base_container_name: str) -> bool:
     '''Checks if the pod or its main container has reached a state indicating that the workload has started executing 
         (e.g., Running, Succeeded, or Terminated).'''
 
-    # Fetch the overall status object of the pod
+
     status = getattr(pod, "status", None)
     
-    # Check if the pod's broad phase has reached RUNNING, SUCCEEDED, or FAILED.
-    # If yes, it means the pod definitely started executing its workload.
+    # Check if the pod's broad phase- RUNNING, SUCCEEDED, or FAILED.
+  
     if getattr(status, "phase", None) in (PodPhase.RUNNING, PodPhase.SUCCEEDED, PodPhase.FAILED):
         return True  
         
-    # If the main phase isn't clear, we dig deeper and check the individual containers inside the pod.
+    # check the individual containers inside the pod.
     container_statuses = getattr(status, "container_statuses", None)
     
-    # If the container list doesn't exist yet, the pod clearly hasn't started.
+    #pod hasnt started
     if not isinstance(container_statuses, list):
         return False
         
-    # Loop through each container's status inside the pod
     for container_status in container_statuses:
-        # If this is not our main application container (the "base" container), skip it.
         if getattr(container_status, "name", None) != base_container_name:
             continue
             
         state = getattr(container_status, "state", None)
-        # Check if our specific base container is currently running or has already terminated.
-        # If so, the workload started executing.
+
         if getattr(state, "running", None) is not None or getattr(state, "terminated", None) is not None:
             return True  
             
@@ -205,7 +202,6 @@ async def await_pod_start(
     start_check_time = time.time()
     is_async = isinstance(pod_manager, AsyncPodManager)
 
-    # added read by KubernetesPodOperator to decide whether a 404 may launch a replacement.
     setattr(pod_manager, "_startup_observed_started", False)
 
     while True:
@@ -214,7 +210,6 @@ async def await_pod_start(
         else:
             remote_pod = pod_manager.read_pod(pod)
 
-        # added condition on base container
         if _base_container_may_have_run(remote_pod, base_container_name):
             setattr(pod_manager, "_startup_observed_started", True)
 

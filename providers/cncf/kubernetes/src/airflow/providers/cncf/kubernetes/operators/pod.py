@@ -679,27 +679,23 @@ class KubernetesPodOperator(BaseOperator):
     def _await_pod_start_or_relaunch(self, context: Context) -> None:
         '''Waits for the pod to start normally, but automatically creates and launches a replacement pod if the original one disappears 
           (returns a 404 error) before it even starts running.'''
-        # Allow up to 3 attempts (_POD_PREEMPTION_MAX_ATTEMPTS = 3) to launch a pod.
+        # 3 attempts
         for attempt in range(_POD_PREEMPTION_MAX_ATTEMPTS):
             try:
-                #  Try to wait for the pod to start normally.
                 self.await_pod_start(pod=self.pod)
-                return  # If it starts successfully with no errors. Exit the function.
+                return 
                 
-            except ApiException as exc:
-                # An API error occurred! Check "tracker" flag from pod_manager.
+            except ApiException as exc: 
                 observed_started = getattr(self.pod_manager, "_startup_observed_started", False)
                 
-                # Decide if we should FAIL the task. We fail if ANY of these 3 are true:
+                #  fail if ANY of these 3 are true:
                 if (
                     str(exc.status) != "404"  # The error is NOT a 404 (e.g., a 500 Network error instead)
                     or observed_started       # OR the pod had already started running its actual job (unsafe to retry)
                     or attempt == _POD_PREEMPTION_MAX_ATTEMPTS - 1  # OR we have run out of our 3 maximum retries
                 ):
-                    raise  # Throw the error and fail the Airflow task immediately.
+                    raise 
 
-            # If the code reaches here, it means we got a 404 AND the pod never started running!
-            # Log a warning that the pod was preempted and we are launching a replacement.
             self.log.warning(
                 "Pod %s disappeared before it started. Launching a replacement (%s/%s).",
                 self.pod.metadata.name,
@@ -707,24 +703,21 @@ class KubernetesPodOperator(BaseOperator):
                 _POD_PREEMPTION_MAX_ATTEMPTS,
             )
             
-            # Create an exact carbon copy (clone) of the original pod configuration.
+            # Create (clone) of the original pod configuration.
             replacement = copy.deepcopy(self.pod_request_obj)
             
-            # Add a new random suffix to the cloned pod's name so it doesn't clash with the old deleted one.
+            # Add suffix to pod
             if self.name and self.random_name_suffix:
                 replacement.metadata.name = add_unique_suffix(name=self.name)
                 
-            #  Update the main operator object with the new pod and create it in the Kubernetes cluster.
             self.pod_request_obj = replacement
             self.pod = self.get_or_create_pod(pod_request_obj=replacement, context=context)
             
-            # Tell Airflow (via XCom) to forget the old pod name and save the new pod name/namespace.
             ti = context["ti"]
             ti.xcom_push(key="pod_name", value=self.pod.metadata.name)
             ti.xcom_push(key="pod_namespace", value=self.pod.metadata.namespace)
             self.remote_pod = self.find_pod(self.pod.metadata.namespace, context=context)
             
-            # Trigger any Airflow callbacks (plugins) to let them know the new pod is created and ready.
             for callback in self.callbacks:
                 callback.on_pod_creation(
                     pod=self.remote_pod,
