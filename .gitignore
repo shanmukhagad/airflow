@@ -346,3 +346,5 @@ dev/registry/providers.json
 !/.claude/skills/magpie-setup
 /.github/skills/magpie-*
 !/.github/skills/magpie-setup
+reproduce_tz.py
+start_airflow.sh
