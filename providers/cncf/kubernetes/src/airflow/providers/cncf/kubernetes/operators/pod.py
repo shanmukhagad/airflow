@@ -690,9 +690,9 @@ class KubernetesPodOperator(BaseOperator):
                 
                 #  fail if ANY of these 3 are true:
                 if (
-                    str(exc.status) != "404"  # The error is NOT a 404 (e.g., a 500 Network error instead)
-                    or observed_started       # OR the pod had already started running its actual job (unsafe to retry)
-                    or attempt == _POD_PREEMPTION_MAX_ATTEMPTS - 1  # OR we have run out of our 3 maximum retries
+                    str(exc.status) != "404"   
+                    or observed_started       
+                    or attempt == _POD_PREEMPTION_MAX_ATTEMPTS - 1 
                 ):
                     raise 
 
