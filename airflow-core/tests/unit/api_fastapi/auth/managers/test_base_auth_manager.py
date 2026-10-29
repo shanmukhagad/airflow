@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import warnings
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 from jwt import InvalidTokenError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 from airflow.api_fastapi.auth.managers.base_auth_manager import BaseAuthManager, T
 from airflow.api_fastapi.auth.managers.models.base_user import BaseUser
@@ -154,6 +155,16 @@ def auth_manager():
 
 
 class TestBaseAuthManager:
+
+    @staticmethod
+    def _stale_connection_error() -> OperationalError:
+        """Return a MySQL idle-timeout database error for testing."""
+        return OperationalError(
+            statement="SELECT EXISTS (SELECT 1 FROM revoked_token WHERE jt1 = %s)",
+            params=("some-jti",),
+            orig=Exception("(4031), The Client was disconnected by the server because of inactivity.")
+        )
+
     def test_init_non_multi_team_mode(self, auth_manager):
         assert auth_manager.init() is None
 
@@ -257,6 +268,55 @@ class TestBaseAuthManager:
 
         mock_is_revoked.assert_called_once_with("some-jti")
 
+    @patch("airflow.settings.Session.remove")
+    @patch("airflow.models.revoked_token.RevokedToken.is_revoked", side_effect=[SQLAlchemyError, False])
+    @patch(
+        "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
+        autospec=True,
+    )
+    @patch.object(EmptyAuthManager, "deserialize_user")
+    @pytest.mark.asyncio
+    async def test_get_user_from_token_retries_revoked_token_check(
+        self, mock_deserialize_user, mock__get_token_validator, mock_is_revoked, mock_session_remove, auth_manager
+    ):
+        token = "token"
+        payload = {"jti": "some-jti"}
+        user = BaseAuthManagerUserTest(name="test")
+        signer = AsyncMock(spec=JWTValidator)
+        signer.avalidated_claims.return_value = payload
+        mock__get_token_validator.return_value = signer
+        mock_deserialize_user.return_value = user
+
+        result = await auth_manager.get_user_from_token(token)
+
+        assert result == user
+        mock_is_revoked.assert_has_calls([call("some-jti"), call("some-jti")])
+        mock_session_remove.assert_called_once_with()
+
+    @patch("airflow.settings.Session.remove")
+    @patch(
+        "airflow.models.revoked_token.RevokedToken.is_revoked",
+        side_effect=[SQLAlchemyError, SQLAlchemyError],
+    )
+    @patch(
+        "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
+        autospec=True,
+    )
+    @pytest.mark.asyncio
+    async def test_get_user_from_token_reraises_revoked_token_check_error(
+        self, mock__get_token_validator, mock_is_revoked, mock_session_remove, auth_manager
+    ):
+        token = "token"
+        signer = AsyncMock(spec=JWTValidator)
+        signer.avalidated_claims.return_value = {"jti": "some-jti"}
+        mock__get_token_validator.return_value = signer
+
+        with pytest.raises(SQLAlchemyError):
+            await auth_manager.get_user_from_token(token)
+
+        assert mock_is_revoked.call_count == 2
+        assert mock_session_remove.call_count == 2
+
     @patch(
         "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
         autospec=True,
@@ -278,6 +338,92 @@ class TestBaseAuthManager:
         mock_deserialize_user.assert_called_once_with(payload)
         signer.avalidated_claims.assert_called_once_with(token)
 
+    
+    @patch("airflow.api_fastapi.auth.managers.base_auth_manager.settings.Session")
+    @patch("airflow.models.revoked_token.RevokedToken.is_revoked")
+    @patch(
+        "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
+        autospec=True,
+    )
+    @patch.object(EmptyAuthManager, "deserialize_user")
+    @pytest.mark.asyncio
+    async def test_get_user_from_token_recovers_from_stale_revoked_token_session(
+        self,
+        mock_deserialize_user,
+        mock_get_token_validator,
+        mock_is_revoked,
+        mock_session,
+        auth_manager,
+    ):
+        payload = {"jti": "some-jti"}
+        user = BaseAuthManagerUserTest(name="test")
+        signer = AsyncMock(spec=JWTValidator)
+        signer.avalidated_claims.return_value = payload
+        mock_get_token_validator.return_value = signer
+        mock_is_revoked.side_effect = [self._stale_connection_error(), False]
+        mock_deserialize_user.return_value = user
+
+        result = await auth_manager.get_user_from_token("token")
+
+        assert result == user
+        assert mock_is_revoked.call_count == 2
+        mock_session.remove.assert_called_once_with()
+        mock_deserialize_user.assert_called_once_with(payload)
+
+    @patch("airflow.api_fastapi.auth.managers.base_auth_manager.settings.Session")
+    @patch("airflow.models.revoked_token.RevokedToken.is_revoked")
+    @patch(
+        "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
+        autospec=True,
+    )
+    @pytest.mark.asyncio
+    async def test_get_user_from_token_rejects_revoked_token_after_stale_session_retry(
+        self,
+        mock_get_token_validator,
+        mock_is_revoked,
+        mock_session,
+        auth_manager,
+    ):
+        signer = AsyncMock(spec=JWTValidator)
+        signer.avalidated_claims.return_value = {"jti": "some-jti"}
+        mock_get_token_validator.return_value = signer
+        mock_is_revoked.side_effect = [self._stale_connection_error(), True]
+
+        with pytest.raises(InvalidTokenError, match="Token has been revoked"):
+            await auth_manager.get_user_from_token("token")
+
+        assert mock_is_revoked.call_count == 2
+        mock_session.remove.assert_called_once_with()
+    
+    @patch("airflow.api_fastapi.auth.managers.base_auth_manager.settings.Session")
+    @patch("airflow.models.revoked_token.RevokedToken.is_revoked")
+    @patch(
+        "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
+        autospec=True,
+    )
+    @pytest.mark.asyncio
+    async def test_get_user_from_token_reraises_after_revoked_token_retry_fails(
+        self,
+        mock_get_token_validator,
+        mock_is_revoked,
+        mock_session,
+        auth_manager,
+    ):
+        signer = AsyncMock(spec=JWTValidator)
+        signer.avalidated_claims.return_value = {"jti": "some-jti"}
+        mock_get_token_validator.return_value = signer
+        mock_is_revoked.side_effect = [
+            self._stale_connection_error(),
+            self._stale_connection_error(),
+        ]
+
+        with pytest.raises(SQLAlchemyError):
+            await auth_manager.get_user_from_token("token")
+
+        assert mock_is_revoked.call_count == 2
+        assert mock_session.remove.call_count == 2
+    
+    
     @patch(
         "airflow.api_fastapi.auth.managers.base_auth_manager.BaseAuthManager._get_token_validator",
         autospec=True,
