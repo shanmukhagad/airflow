@@ -21,7 +21,9 @@ import re
 import string
 import time
 from datetime import datetime, timedelta
+from http.client import RemoteDisconnected
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -29,7 +31,7 @@ from kubernetes.client import models as k8s
 from kubernetes.client.rest import ApiException
 from sqlalchemy import inspect
 from urllib3 import HTTPResponse
-from unittest.mock import MagicMock, patch
+from urllib3.exceptions import ProtocolError
 
 from airflow.jobs.job import Job
 from airflow.models.taskinstancekey import TaskInstanceKey
@@ -314,6 +316,46 @@ class TestAirflowKubernetesScheduler:
         assert kube_executor.RUNNING_POD_LOG_LINES == 100
         assert kube_executor_2.RUNNING_POD_LOG_LINES == 200
 
+    @staticmethod
+    def _make_scheduler_for_pod_creation():
+        # Skip the real __init__ so we don't need a cluster
+        with mock.patch.object(AirflowKubernetesScheduler, "__init__", return_value=None):
+            scheduler = AirflowKubernetesScheduler()
+        scheduler.kube_client = mock.MagicMock()
+        scheduler.kube_config = mock.MagicMock()
+        scheduler.team_name = None
+        scheduler.kube_client.api_client.sanitize_for_serialization.return_value = {}
+        return scheduler
+
+    @staticmethod
+    def _connection_error():
+        return ProtocolError(
+            "Connection aborted.", RemoteDisconnected("Remote end closed connection without response")
+        )
+
+    @mock.patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor_utils.time.sleep")
+    def test_run_pod_async_retries_connection_error_then_raises(self, mock_sleep):
+        scheduler = self._make_scheduler_for_pod_creation()
+        scheduler.kube_client.create_namespaced_pod.side_effect = self._connection_error()
+        pod = k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="test-pod", namespace="default"))
+
+        with pytest.raises(ProtocolError):
+            scheduler.run_pod_async(pod)
+
+        assert scheduler.kube_client.create_namespaced_pod.call_count == 3
+        assert [call.args[0] for call in mock_sleep.call_args_list] == [1, 2]
+
+    @mock.patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor_utils.time.sleep")
+    def test_run_pod_async_succeeds_after_connection_error(self, mock_sleep):
+        scheduler = self._make_scheduler_for_pod_creation()
+        scheduler.kube_client.create_namespaced_pod.side_effect = [self._connection_error(), "pod-created"]
+        pod = k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="test-pod", namespace="default"))
+
+        resp = scheduler.run_pod_async(pod)
+
+        assert resp == "pod-created"
+        assert scheduler.kube_client.create_namespaced_pod.call_count == 2
+
 
 class TestKubernetesExecutor:
     """
@@ -326,7 +368,9 @@ class TestKubernetesExecutor:
         self.kubernetes_executor.job_id = 5
         self.kubernetes_executor._last_completed_pod_adoption = time.monotonic()
 
-    @patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure")
+    @patch(
+        "airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure"
+    )
     def test_change_state_infrastructure_failure_requeues(self, mock_is_pre_exec):
         key = TaskInstanceKey("dag_id", "task_id", "run_id", 1)
         results = KubernetesResults(
@@ -347,8 +391,10 @@ class TestKubernetesExecutor:
         assert state == TaskInstanceState.QUEUED
         assert "Infrastructure failure" in reason
 
-    @patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure")
-    def test_change_state_none_pod_reason_requeues(self,mock_is_pre_exec):
+    @patch(
+        "airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor._is_pre_execution_failure"
+    )
+    def test_change_state_none_pod_reason_requeues(self, mock_is_pre_exec):
         """Test that missing or None pod_reason is handled safely without throwing AttributeError."""
         key = TaskInstanceKey("dag_id", "task_id", "run_id", 1)
         results = KubernetesResults(

@@ -20,12 +20,13 @@ import contextlib
 import json
 import multiprocessing
 import time
+from http.client import RemoteDisconnected
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from kubernetes import client, watch
 from kubernetes.client.rest import ApiException
-from urllib3.exceptions import ReadTimeoutError
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 from airflow.providers.cncf.kubernetes.backcompat import get_logical_date_key
 from airflow.providers.cncf.kubernetes.executors.kubernetes_executor_types import (
@@ -495,9 +496,25 @@ class AirflowKubernetesScheduler(LoggingMixin):
         self.log.debug("Pod Creation Request: \n%s", json_pod)
         try:
             with Stats.timer("kubernetes_executor.pod_creation"):
-                resp = self.kube_client.create_namespaced_pod(
-                    body=sanitized_pod, namespace=pod.metadata.namespace, **kwargs
-                )
+                max_attempts = 3
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        resp = self.kube_client.create_namespaced_pod(
+                            body=sanitized_pod, namespace=pod.metadata.namespace, **kwargs
+                        )
+                        break
+                    except (ProtocolError, RemoteDisconnected, ConnectionError):
+                        if attempt == max_attempts:
+                            raise
+                        wait_seconds = 2 ** (attempt - 1)
+                        self.log.warning(
+                            "Connection error while creating pod (attempt %s/%s). Retrying in %s second(s).",
+                            attempt,
+                            max_attempts,
+                            wait_seconds,
+                        )
+                        time.sleep(wait_seconds)
+
             Stats.incr("kubernetes_executor.pod_creation_status", tags={"status": "200"})
             self.log.debug("Pod Creation Response: %s", resp)
         except ApiException as e:
