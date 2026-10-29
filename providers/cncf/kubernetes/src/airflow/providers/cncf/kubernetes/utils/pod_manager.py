@@ -153,14 +153,13 @@ def _base_container_may_have_run(pod: V1Pod, base_container_name: str) -> bool:
     status = getattr(pod, "status", None)
     
     # Check if the pod's broad phase- RUNNING, SUCCEEDED, or FAILED.
-  
     if getattr(status, "phase", None) in (PodPhase.RUNNING, PodPhase.SUCCEEDED, PodPhase.FAILED):
         return True  
         
     # check the individual containers inside the pod.
     container_statuses = getattr(status, "container_statuses", None)
     
-    #pod hasnt started
+    #pod hasn't started
     if not isinstance(container_statuses, list):
         return False
         
@@ -172,8 +171,7 @@ def _base_container_may_have_run(pod: V1Pod, base_container_name: str) -> bool:
 
         if getattr(state, "running", None) is not None or getattr(state, "terminated", None) is not None:
             return True  
-            
-    # If none of the conditions above are met, the pod has not started executing yet.
+  
     return False
 
 
