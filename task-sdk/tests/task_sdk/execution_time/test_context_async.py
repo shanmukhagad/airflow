@@ -1,18 +1,23 @@
-
 import asyncio
+import logging
 import time
+from uuid import uuid4
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from airflow.sdk.execution_time.comms import AssetStateStoreResult
-from airflow.sdk.execution_time.context import AssetStateStoreAccessor
-from airflow_shared.state import BaseStoreBackend
-from uuid import uuid4
 from airflow.sdk.execution_time import task_runner
-from airflow.sdk.execution_time.comms import TaskStateStoreResult
-from airflow.sdk.execution_time.context import TaskStateStoreAccessor
+from airflow.sdk.execution_time.comms import (
+    AssetStateStoreResult,
+    TaskStateStoreResult,
+)
+from airflow.sdk.execution_time.context import (
+    AssetStateStoreAccessor,
+    TaskStateStoreAccessor,
+)
+from airflow_shared.state import BaseStoreBackend
 
+
+log = logging.getLogger(__name__)
 
 
 class TestBackend(BaseStoreBackend):
@@ -41,10 +46,9 @@ class TestBackend(BaseStoreBackend):
         pass
 
 
-# This test used to check response extraction uses the async asset deserializer.
+# Check that response extraction uses the async asset deserializer.
 @pytest.mark.asyncio
 async def test_aextract_get_response_uses_async_deserializer():
-    # Purpose: Check that 
     accessor = AssetStateStoreAccessor(name="testing_asset")
     response = AssetStateStoreResult(
         value={"__airflow_state_ref__": "fake-ref"}
@@ -62,22 +66,20 @@ async def test_aextract_get_response_uses_async_deserializer():
             response, "job_id", None
         )
 
-    print("Test 1 - Result:", result)
-
     if result == {"status": "success"}:
-        print("Test 1 passed")
+        log.debug("Asset state response deserialized successfully")
     else:
-        print("Test 1 failed")
+        log.debug("Unexpected asset state response: %r", result)
 
     assert result == {"status": "success"}
     backend.adeserialize_asset_state_store_from_ref.assert_awaited_once_with(
         "fake-ref"
     )
 
-# Used to check building a set message uses the async asset serializer.
+
+# Check that building a set message uses the async asset serializer.
 @pytest.mark.asyncio
 async def test_abuild_set_message_uses_async_serializer():
-
     accessor = AssetStateStoreAccessor(name="test_asset")
 
     with patch(
@@ -92,22 +94,20 @@ async def test_abuild_set_message_uses_async_serializer():
             "job_id", "spark_001"
         )
 
-    print("Test 2 - Message key:", message.key)
-    print("Test 2 - Message value:", message.value)
-
     if (
         message.key == "job_id"
         and message.value == {"__airflow_state_ref__": "fake-ref"}
     ):
-        print("Test 2 passed")
+        log.debug("Asset state set message validation successfully")
     else:
-        print("Test 2 failed")
+        log.debug("Unexpected asset state set message: %r", message)
 
     assert message.key == "job_id"
     assert message.value == {"__airflow_state_ref__": "fake-ref"}
     backend.aserialize_asset_state_store_to_ref.assert_awaited_once()
 
-# Showind the that running slow serialization in a thread
+
+# Check that slow serialization in a thread does not block the event loop.
 @pytest.mark.asyncio
 async def test_async_serializer_does_not_block_event_loop():
     started = asyncio.Event()
@@ -147,18 +147,20 @@ async def test_async_serializer_does_not_block_event_loop():
         heartbeat(),
     )
 
-    print("Test 3 - Serializer result:", result)
-    print("Test 3 - Heartbeat worked:", heartbeat_worked)
-
     if result == "fake-ref" and heartbeat_worked:
-        print("Test 3 passed")
+        log.debug("serilze completed without blocking the heartbeat as expected ")
     else:
-        print("Test 3 failed")
+        log.debug(
+            "Unexpected serializer result=%r, heartbeat_worked=%s",
+            result,
+            heartbeat_worked,
+        )
 
     assert result == "fake-ref"
     assert heartbeat_worked
 
-#Check the backend asynchronously serializes asset state to JSON.
+
+# Check that the backend asynchronously serializes asset state to JSON.
 @pytest.mark.asyncio
 async def test_base_backend_asset_serializer():
     backend = TestBackend()
@@ -170,17 +172,15 @@ async def test_base_backend_asset_serializer():
         scope=None,
     )
 
-    print("Test 4 - Input value:", value)
-    print("Test 4 - Serialized result:", result)
-
     if result == '{"status": "success"}':
-        print("Test 4 passed")
+        log.debug("Asset state serialization returned the as expected JSON")
     else:
-        print("Test 4 failed")
+        log.debug("Unexpected serialized asset state: %r", result)
 
     assert result == '{"status": "success"}'
 
-# check backend asynchronously converts stored asset JSON back to Python data.
+
+# Check that the backend asynchronously converts stored asset JSON to Python.
 @pytest.mark.asyncio
 async def test_base_backend_asset_deserializer():
     backend = TestBackend()
@@ -189,12 +189,10 @@ async def test_base_backend_asset_deserializer():
         stored='{"status": "success"}'
     )
 
-    print("Test 5 - Deserialized result:", result)
-
     if result == {"status": "success"}:
-        print("Test 5 passed")
+        log.debug("Asset state deserialization returned the expected value")
     else:
-        print("Test 5 failed")
+        log.debug("Unexpected deserialized asset state: %r", result)
 
     assert result == {"status": "success"}
 
@@ -210,13 +208,10 @@ async def test_base_backend_task_serializer():
         scope=None,
     )
 
-    print("Test 6 - Input value:", value)
-    print("Test 6 - Serialized result:", result)
-
     if result == '{"status": "success"}':
-        print("Test 6 passed")
+        log.debug("Task state serialization returned the expected JSON")
     else:
-        print("Test 6 failed")
+        log.debug("Unexpected serialized task state: %r", result)
 
     assert result == '{"status": "success"}'
 
@@ -229,36 +224,27 @@ async def test_base_backend_task_deserializer():
         stored='{"status": "success"}'
     )
 
-    print("Test 7 - Deserialized result:", result)
-
     if result == {"status": "success"}:
-        print("Test 7 passed")
+        log.debug("Task state deserialization returned the expected value")
     else:
-        print("Test 7 failed")
+        log.debug("Unexpected deserialized task state: %r", result)
 
     assert result == {"status": "success"}
 
 
-from uuid import uuid4
-
-from airflow.sdk.execution_time.comms import TaskStateStoreResult
-from airflow.sdk.execution_time.context import TaskStateStoreAccessor
-
-#used to check that aget retrieves task state using async supervisor communication.
+# Check that aget retrieves task state using async supervisor communication.
 @pytest.mark.asyncio
 async def test_task_state_store_aget():
-    
     accessor = TaskStateStoreAccessor(ti_id=uuid4(), scope=None)
 
-    mock_comms = patch.object(
-        task_runner, "SUPERVISOR_COMMS", create=True
-    ).start()
-    mock_backend = patch(
-        "airflow.sdk.execution_time.context._get_worker_state_store_backend"
-    ).start()
-
-    try:
-        # Mock supervisor returning an external ref marker
+    with (
+        patch.object(
+            task_runner, "SUPERVISOR_COMMS", create=True
+        ) as mock_comms,
+        patch(
+            "airflow.sdk.execution_time.context._get_worker_state_store_backend"
+        ) as mock_backend,
+    ):
         mock_comms.asend = AsyncMock(
             return_value=TaskStateStoreResult(
                 value={"__airflow_state_ref__": "fake-task-ref"}
@@ -271,43 +257,35 @@ async def test_task_state_store_aget():
 
         result = await accessor.aget("job_id")
 
-        print("Test 8 - Retrieved value:", result)
-
         if result == {"status": "success"}:
-            print("Test 8 passed")
+            log.debug("Task state retrieved successfully")
         else:
-            print("Test 8 failed")
+            log.debug("Unexpected task state result: %r", result)
 
         assert result == {"status": "success"}
         mock_comms.asend.assert_awaited_once()
         backend.adeserialize_task_state_store_from_ref.assert_awaited_once_with(
             "fake-task-ref"
         )
-    finally:
-        patch.stopall()
 
 
-
+# Check that aset serializes task state and sends it to the supervisor.
 @pytest.mark.asyncio
 async def test_task_state_store_aset():
-    from uuid import uuid4
-
-    from airflow.sdk.execution_time import task_runner
-    from airflow.sdk.execution_time.context import TaskStateStoreAccessor
-
     accessor = TaskStateStoreAccessor(ti_id=uuid4(), scope=None)
 
-    mock_comms = patch.object(
-        task_runner, "SUPERVISOR_COMMS", create=True
-    ).start()
-    mock_conf = patch(
-        "airflow.sdk.execution_time.context.conf.getint", return_value=0
-    ).start()
-    mock_backend = patch(
-        "airflow.sdk.execution_time.context._get_worker_state_store_backend"
-    ).start()
-
-    try:
+    with (
+        patch.object(
+            task_runner, "SUPERVISOR_COMMS", create=True
+        ) as mock_comms,
+        patch(
+            "airflow.sdk.execution_time.context.conf.getint",
+            return_value=0,
+        ),
+        patch(
+            "airflow.sdk.execution_time.context._get_worker_state_store_backend"
+        ) as mock_backend,
+    ):
         mock_comms.asend = AsyncMock()
         backend = mock_backend.return_value
         backend.aserialize_task_state_store_to_ref = AsyncMock(
@@ -316,27 +294,17 @@ async def test_task_state_store_aset():
 
         await accessor.aset("job_id", {"status": "success"})
 
-        print("Test 9 - aset completed")
         mock_comms.asend.assert_awaited_once()
-
         message = mock_comms.asend.await_args.args[0]
-
-        print("Test 9 - Message key:", message.key)
-        print("Test 9 - Message value:", message.value)
 
         if (
             message.key == "job_id"
             and message.value == {"__airflow_state_ref__": "fake-task-ref"}
         ):
-            print("Test 9 passed")
+            log.debug("Task state set message validated successfully")
         else:
-            print("Test 9 failed")
+            log.debug("Unexpected task state set message: %r", message)
 
         assert message.key == "job_id"
         assert message.value == {"__airflow_state_ref__": "fake-task-ref"}
         backend.aserialize_task_state_store_to_ref.assert_awaited_once()
-    finally:
-        patch.stopall()
-
-
-

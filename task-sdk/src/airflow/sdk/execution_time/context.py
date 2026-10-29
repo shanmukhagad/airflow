@@ -27,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 from functools import cache
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 from uuid import UUID
+from airflow.sdk.execution_time.comms import SetAssetStateStoreByName, SetAssetStateStoreByUri
+from airflow.sdk.execution_time.comms import GetAssetStateStoreByName, GetAssetStateStoreByUri
 
 import attrs
 import structlog
@@ -798,7 +800,6 @@ class AssetStateStoreAccessor:
         )  # chnaged this syncronus extrcat_get_response to async
 
     def _build_get_message(self, key: str) -> ToSupervisor:
-        from airflow.sdk.execution_time.comms import GetAssetStateStoreByName, GetAssetStateStoreByUri
 
         msg: ToSupervisor
         if self._name:
@@ -899,8 +900,6 @@ class AssetStateStoreAccessor:
         return msg
 
     async def _abuild_set_message(self, key: str, value: JsonValue) -> ToSupervisor:
-        from airflow.sdk.execution_time.comms import SetAssetStateStoreByName, SetAssetStateStoreByUri
-
         if value is None:
             raise ValueError("Cannot set value as None")
         # if custom backend is configured, store the value on the custom backend, and return the reference
@@ -928,6 +927,8 @@ class AssetStateStoreAccessor:
             msg = SetAssetStateStoreByName(name=self._name, key=key, value=stored)
         elif self._uri:
             msg = SetAssetStateStoreByUri(uri=self._uri, key=key, value=stored)
+        else:
+            raise ValueError("at least a value should be provided asset name or url")
         return msg
 
     def delete(self, key: str) -> None:
