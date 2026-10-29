@@ -1489,15 +1489,21 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 TaskInstanceState.RUNNING,
                 TaskInstanceState.RESTARTING,
             )
+
             ti_requeued = (
                 ti.queued_by_job_id != job_id  # Another scheduler has queued this task again
                 or executor.has_task(ti)  # This scheduler has this task already
                 or (
                     # Resume-after-defer: trigger moved TI to scheduled (next_method set) before we saw the
                     # executor success from the defer exit for the same try_number.
-                    ti.state == TaskInstanceState.SCHEDULED
+                    ti.state in (TaskInstanceState.SCHEDULED, TaskInstanceState.QUEUED)
                     and state == TaskInstanceState.SUCCESS
                     and ti.next_method is not None
+                )
+                or (
+                    ti.state == TaskInstanceState.RUNNING
+                    and state == TaskInstanceState.SUCCESS
+                    and ti.next_method is None
                 )
             )
 
