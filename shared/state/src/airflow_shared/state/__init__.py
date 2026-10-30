@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -268,6 +269,17 @@ class BaseStoreBackend(ABC):
         """
         return json.dumps(value)
 
+    async def aserialize_task_state_store_to_ref(
+        self, *, value: JsonValue, key: str, scope: TaskScope
+    ) -> str:
+        """Async variant of ``serialize_task_state_store_to_ref``.
+        Defaults to offloading the sync implementation to a thread, so backends that
+        have not overridden it stay correct and stop blocking the caller's loop.
+        """
+        return await asyncio.to_thread(
+            self.serialize_task_state_store_to_ref, value=value, key=key, scope=scope
+        )
+
     def deserialize_task_state_store_from_ref(self, stored: str) -> JsonValue:
         """
         Resolve a stored task state store reference back to the actual value.
@@ -277,6 +289,10 @@ class BaseStoreBackend(ABC):
         ``serialize_task_state_store_to_ref`` encoding.
         """
         return json.loads(stored)
+
+    async def adeserialize_task_state_store_from_ref(self, stored: str) -> JsonValue:
+        """Async variant of ``deserialize_task_state_store_from_ref``."""
+        return await asyncio.to_thread(self.deserialize_task_state_store_from_ref, stored)
 
     def serialize_asset_state_store_to_ref(self, *, value: JsonValue, key: str, scope: AssetScope) -> str:
         """
@@ -298,6 +314,17 @@ class BaseStoreBackend(ABC):
         """
         return json.dumps(value)
 
+    async def aserialize_asset_state_store_to_ref(
+        self, *, value: JsonValue, key: str, scope: AssetScope
+    ) -> str:
+        """Async variant of ``serialize_asset_state_store_to_ref``.
+        Defaults to offloading the sync implementation to a thread, so backends that
+        have not overridden it stay correct and stop blocking the caller's loop.
+        """
+        return await asyncio.to_thread(
+            self.serialize_asset_state_store_to_ref, value=value, key=key, scope=scope
+        )
+
     def deserialize_asset_state_store_from_ref(self, stored: str) -> JsonValue:
         """
         Resolve a stored asset state store reference back to the actual value.
@@ -307,3 +334,10 @@ class BaseStoreBackend(ABC):
         ``serialize_asset_state_store_to_ref`` encoding.
         """
         return json.loads(stored)
+
+    async def adeserialize_asset_state_store_from_ref(self, stored: str) -> JsonValue:
+        """Async variant of ``deserialize_asset_state_store_from_ref``.
+        Defaults to offloading the sync implementation to a thread, so backends that
+        have not overridden it stay correct and stop blocking the caller's loop.
+        """
+        return await asyncio.to_thread(self.deserialize_asset_state_store_from_ref, stored)
