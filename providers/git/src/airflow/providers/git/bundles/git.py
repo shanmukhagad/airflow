@@ -212,6 +212,7 @@ class GitDagBundle(BaseDagBundle):
                 raise RuntimeError("Error cloning repository") from e
             except InvalidGitRepositoryError as e:
                 raise RuntimeError(f"Invalid git repository at {self.repo_path}") from e
+
             self._log.debug("bundle initialize", version=self.version)
             if self.version:
                 if not self._has_version(self.repo, self.version):
@@ -267,6 +268,8 @@ class GitDagBundle(BaseDagBundle):
             else:
                 self._log.debug("repo exists", repo_path=self.repo_path)
             self.repo = Repo(self.repo_path)
+            if not self._has_version(self.repo, self.tracking_ref):
+                self.repo.remotes.origin.fetch()
             self.repo.git.checkout(self.tracking_ref)
         except NoSuchPathError as e:
             # Protection should the bare repo be removed manually

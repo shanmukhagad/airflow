@@ -210,10 +210,8 @@ class TestGitDagBundle:
         )
         bundle.initialize()
         assert _version_str(bundle.get_current_version()) == starting_commit.hexsha
-
         files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
         assert {"test_dag.py"} == files_in_repo
-
     @mock.patch("airflow.providers.git.bundles.git.GitHook")
     def test_get_latest(self, mock_githook, git_repo):
         repo_path, repo = git_repo
@@ -777,9 +775,7 @@ class TestGitDagBundle:
         files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
         assert {"test_dag.py"} == files_in_repo
 
-    @mock.patch("airflow.providers.git.bundles.git.GitHook")
     def test_tracking_ref_commit_sha_promote_succeeds_after_retry(self, mock_githook, git_repo):
-        """A checkout failure cleans up the stale tracking clone and retries successfully."""
         repo_path, repo = git_repo
         mock_githook.return_value.repo_url = repo_path
         first_commit = repo.head.commit
@@ -796,10 +792,13 @@ class TestGitDagBundle:
         repo.index.add([file_path])
         second_commit = repo.index.commit("Another commit")
 
-        # Reinitialization should recover from the stale tracking clone.
+        # Promote in-place: config change re-creates the bundle against the same local
         bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=second_commit.hexsha)
         bundle.initialize()
         assert _version_str(bundle.get_current_version()) == second_commit.hexsha
+        files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
+        assert {"test_dag.py", "new_test.py"} == files_in_repo
+        assert_repo_is_closed(bundle)
 
     @mock.patch("airflow.providers.git.bundles.git.GitHook")
     def test_tracking_ref_commit_sha_promote_succeeds_with_fresh_storage(self, mock_githook, git_repo):
