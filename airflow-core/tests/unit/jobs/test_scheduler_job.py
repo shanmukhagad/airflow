@@ -548,6 +548,154 @@ class TestSchedulerJob:
             any_order=True,
         )
 
+    def test_process_executor_events_skips_stale_defer_exit_when_scheduled_with_next_method(self, dag_maker):
+        '''
+        Stale defer-exit SUCCESS event is skipped when TI is SCHEDULED and next_method is set.
+        '''    
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+
+        ti1.state = State.SCHEDULED
+        ti1.next_method = "on_resume"
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+        
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.SCHEDULED
+
+    def test_process_executor_events_skips_stale_defer_exit_when_queued_with_next_method(self,dag_maker):
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_queued", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+        
+        ti1.state = State.QUEUED
+        ti1.next_method = "on_resume"
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+        
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+                
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.QUEUED
+
+
+    def test_process_executor_events_skips_stale_defer_exit_when_running_without_next_method(self,dag_maker):
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_running", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+                    
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+        
+        ti1.state = State.RUNNING
+        ti1.next_method = None
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.RUNNING
+
+    def test_process_executor_events_processes_event_when_scheduled_without_next_method(self,dag_maker):
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+
+        ti1.state = State.SCHEDULED
+        ti1.next_method = None
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.FAILED
+
+    def test_process_executor_events_processes_event_when_queued_without_next_method(self,dag_maker):
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+    
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+    
+        ti1.state = State.QUEUED
+        ti1.next_method = None
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+    
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+    
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.FAILED
+
+    def test_process_executor_events_processes_event_when_running_with_next_method(self,dag_maker):
+        session = settings.Session()
+        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
+            task1 = EmptyOperator(task_id = "dummy_task")
+        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
+        
+        executor = MockExecutor(do_update=False)
+        scheduler_job = Job()
+        session.add(scheduler_job)
+        session.commit()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
+        
+        ti1.state = State.RUNNING
+        ti1.next_method = "on_resume"
+        ti1.queued_by_job_id = scheduler_job.id
+        session.merge(ti1)
+        session.commit()
+        
+        executor.event_buffer[ti1.key] = State.SUCCESS,None
+        
+        self.job_runner._process_executor_events(executor=executor, session = session)
+        ti1.refresh_from_db(session=session)
+        assert ti1.state == State.FAILED
+
     @mock.patch("airflow.jobs.scheduler_job_runner.TaskCallbackRequest", spec=TaskCallbackRequest)
     def test_process_executor_events_restarting_cleared_task(self, mock_task_callback, dag_maker):
         """
