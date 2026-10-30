@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Field name used in serialization - must be in sync with SerializedReferenceModels.REFERENCE_TYPE_FIELD
 REFERENCE_TYPE_FIELD = "reference_type"
-
+REFERENCE_TIMING_FIELD = "reference_timing"
 
 class BaseDeadlineReference(ABC):
     """
@@ -49,7 +49,7 @@ class BaseDeadlineReference(ABC):
     For custom deadline references, users should inherit from this class and implement
     ``_evaluate_with()`` with deferred Core imports (imports inside the method body).
     """
-
+    reference_timing: str | None = None
     @property
     def reference_name(self) -> str:
         """Return the class name as the reference identifier."""
@@ -61,7 +61,11 @@ class BaseDeadlineReference(ABC):
 
         Override this method in subclasses if additional data is needed for serialization.
         """
-        return {REFERENCE_TYPE_FIELD: self.reference_name}
+        data: dict[str, Any] = {REFERENCE_TYPE_FIELD: self.reference_name}
+        timing = getattr(self, "reference_timing", None)
+        if timing is not None:
+            data[REFERENCE_TIMING_FIELD] = timing
+        return data
 
     @classmethod
     def deserialize_reference(cls, reference_data: dict[str, Any]) -> BaseDeadlineReference:
@@ -70,7 +74,11 @@ class BaseDeadlineReference(ABC):
 
         :param reference_data: Dictionary containing serialized reference data.
         """
-        return cls()
+        instance = cls()
+        timing = reference_data.get(REFERENCE_TIMING_FIELD)
+        if timing is not None:
+            instance.reference_timing = timing
+        return instance
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, BaseDeadlineReference):
@@ -87,7 +95,7 @@ class DagRunLogicalDateDeadline(BaseDeadlineReference):
 
 class DagRunQueuedAtDeadline(BaseDeadlineReference):
     """A deadline that returns when a DagRun was queued."""
-
+    reference_timing: str = "DAGRUN_QUEUED"
 
 @dataclass
 class FixedDatetimeDeadline(BaseDeadlineReference):
@@ -290,6 +298,9 @@ class DeadlineReference:
         if not issubclass(reference_class, (BaseDeadlineReference, ReferenceModels.BaseDeadlineReference)):
             raise ValueError(f"{reference_class.__name__} must inherit from BaseDeadlineReference")
 
+        timing_val = getattr(deadline_reference_type, "value", str(deadline_reference_type))
+        setattr(reference_class, "reference_timing", timing_val)
+        
         # Register the new reference with DeadlineReference for discoverability
         try:
             reference_instance = reference_class()
@@ -299,20 +310,40 @@ class DeadlineReference:
                 f"registered as a deadline reference. If it takes parameters, decorate it with "
                 f"@dataclass and give every field a default value. Original error: {e}"
             ) from e
+        
+        if not hasattr(reference_instance, "reference_timing") or reference_instance.reference_timing is None:
+            reference_instance.reference_timing = timing_val
+
         setattr(cls, reference_class.__name__, reference_instance)
         logger.info("Registered DeadlineReference %s", reference_class.__name__)
 
         # Add to appropriate deadline_reference_type classification
-        if deadline_reference_type is cls.TYPES.DAGRUN_CREATED:
-            cls.TYPES.DAGRUN_CREATED = cls.TYPES.DAGRUN_CREATED + (reference_class,)
-        elif deadline_reference_type is cls.TYPES.DAGRUN_QUEUED:
+        if (
+            deadline_reference_type is cls.TYPES.DAGRUN_QUEUED
+            or deadline_reference_type == "DAGRUN_QUEUED"
+            or (
+                isinstance(deadline_reference_type, tuple)
+                and DagRunQueuedAtDeadline in deadline_reference_type
+            )
+        ):
+            timing_val = "DAGRUN_QUEUED"
             cls.TYPES.DAGRUN_QUEUED = cls.TYPES.DAGRUN_QUEUED + (reference_class,)
-        else:
+        elif (
+            deadline_reference_type is cls.TYPES.DAGRUN_CREATED
+            or deadline_reference_type == "DAGRUN_CREATED"
+            or (
+                isinstance(deadline_reference_type, tuple)
+                and DagRunLogicalDateDeadline in deadline_reference_type
+            )
+        ):
+            timing_val = "DAGRUN_CREATED"
+            cls.TYPES.DAGRUN_CREATED = cls.TYPES.DAGRUN_CREATED + (reference_class,)
+        else:   
             raise ValueError(
                 f"Invalid deadline reference type {deadline_reference_type}; "
                 "must be a valid DeadlineReference.TYPES option."
             )
-
+        reference_class.reference_timing = timing_val
         # Refresh the combined DAGRUN tuple
         cls.TYPES.DAGRUN = cls.TYPES.DAGRUN_CREATED + cls.TYPES.DAGRUN_QUEUED
 
