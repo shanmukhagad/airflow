@@ -39,7 +39,6 @@ from airflow.serialization.helpers import serialize_template_field
 from airflow.utils.retries import retry_db_transaction
 from airflow.utils.session import NEW_SESSION, provide_session
 from airflow.utils.sqlalchemy import build_upsert_stmt, get_dialect_name
-from airflow.utils.helpers import order_rendered_fields
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -171,9 +170,7 @@ class RenderedTaskInstanceFields(TaskInstanceDependencies):
             from airflow.providers.cncf.kubernetes.template_rendering import render_k8s_pod_yaml
 
             self.k8s_pod_yaml = render_k8s_pod_yaml(ti)
-        raw_rendered_fields = rendered_fields or get_serialized_template_fields(task=ti.task)
-        template_fields = getattr(ti.task, "template_fields", ())
-        self.rendered_fields = order_rendered_fields(raw_rendered_fields, template_fields)
+        self.rendered_fields = rendered_fields or get_serialized_template_fields(task=ti.task)
 
         self._redact()
 

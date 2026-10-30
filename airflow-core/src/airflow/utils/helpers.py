@@ -21,7 +21,7 @@ import copy
 import itertools
 import re
 import signal
-from collections.abc import Callable, Generator, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Generator, Iterable, MutableMapping
 from functools import cache
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 from urllib.parse import urljoin
@@ -298,26 +298,6 @@ def prune_dict(val: Any, mode="strict"):
         return new_list
     return val
 
-def order_rendered_fields(
-    rendered_fields: dict[str, Any],
-    declared_template_fields: Sequence[str] | Iterable[str] | None = None,
-) -> dict[str, Any]:
-    
-    if not rendered_fields:
-        return {}
-
-    ordered_result: dict[str, Any] = {}
-    declared = list(declared_template_fields) if declared_template_fields else []
-
-    for field in declared:
-        if field in rendered_fields:
-            ordered_result[field] = rendered_fields[field]
-
-    for field, value in rendered_fields.items():
-        if field not in ordered_result:
-            ordered_result[field] = value
-
-    return ordered_result
 
 __deprecated_imports = {
     "render_template_as_native": "airflow.sdk.definitions.context",

@@ -41,7 +41,6 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import task as task_decorator
 from airflow.utils.sqlalchemy import get_dialect_name
 from airflow.utils.state import TaskInstanceState
-from airflow.utils.helpers import order_rendered_fields
 
 from tests_common.test_utils.asserts import assert_queries_count
 from tests_common.test_utils.db import clear_db_dags, clear_db_runs, clear_rendered_ti_fields
@@ -496,30 +495,3 @@ class TestRenderedTaskInstanceFields:
         ti.state = None
         # rerun the old run. this shouldn't fail
         dag_maker.run_ti(task.task_id, dr)
-
-    def test_order_rendered_fields_declared_first_then_remainder(self):
-        declared_template_fields = ("bash_command", "env", "cwd")
-        rendered_input = {
-            "extra_debug_info": "123",
-            "env": {"FOO": "BAR"},
-            "unlisted_field": "test",
-            "bash_command": "echo hello",
-        }
-        ordered = order_rendered_fields(rendered_input, declared_template_fields)
-        keys = list(ordered.keys())
-
-        assert keys[0] == "bash_command"
-        assert keys[1] == "env"
-        assert keys[2] == "extra_debug_info"
-        assert keys[3] == "unlisted_field"
-
-    def test_order_rendered_fields_with_no_template_fields(self):
-        rendered_input = {
-            "zeta": 1,
-            "alpha": 2,
-            "beta": 3,
-        }
-
-        ordered = order_rendered_fields(rendered_input, declared_template_fields=None)
-
-        assert list(ordered.keys()) == ["zeta", "alpha", "beta"]
