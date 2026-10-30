@@ -283,7 +283,6 @@ def encode_deadline_reference(ref) -> dict[str, Any]:
     timing = getattr(ref, "reference_timing", None) or getattr(ref, "timing", None)
     if timing is not None and "reference_timing" not in serialized:
         serialized["reference_timing"] = getattr(timing, "value", str(timing))
-    
     module = type(ref).__module__
     if module not in _BUILTIN_DEADLINE_MODULES:
         serialized["__class_path"] = qualname(ref)

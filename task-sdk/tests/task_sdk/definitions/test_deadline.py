@@ -219,7 +219,6 @@ def test_builtin_deadline_reference_serialization():
     serialized = ref.serialize_reference()
     assert serialized.get(REFERENCE_TIMING_FIELD) == "DAGRUN_QUEUED"
 
-
 def test_custom_deadline_reference_registration_and_serialization():
     from airflow.sdk.definitions.deadline import (
         BaseDeadlineReference,
@@ -234,7 +233,6 @@ def test_custom_deadline_reference_registration_and_serialization():
     )
     instance = CustomQueuedRef()
     serialized = instance.serialize_reference()
-
     assert getattr(CustomQueuedRef, "reference_timing", None) is not None
     assert serialized.get(REFERENCE_TIMING_FIELD) == "DAGRUN_QUEUED"
 
@@ -254,13 +252,10 @@ def test_deadline_reference_deserialization_with_timing():
 def test_serialize_deadline_reference_encodes_timing():
     from airflow.sdk.definitions.deadline import DagRunQueuedAtDeadline, REFERENCE_TIMING_FIELD
     from airflow.serialization.serialized_objects import SerializedBaseOperator
-
     ref = DagRunQueuedAtDeadline()
     serialized_dict = ref.serialize_reference()
-
     assert REFERENCE_TIMING_FIELD in serialized_dict
     assert serialized_dict[REFERENCE_TIMING_FIELD] == "DAGRUN_QUEUED"
-
 
 def test_deserialize_legacy_deadline_reference_without_timing():
     from airflow.sdk.definitions.deadline import (
@@ -271,5 +266,4 @@ def test_deserialize_legacy_deadline_reference_without_timing():
         REFERENCE_TYPE_FIELD: "DagRunQueuedAtDeadline"
     }
     deserialized = BaseDeadlineReference.deserialize_reference(legacy_payload)
-
     assert getattr(deserialized, "reference_timing", None) is None

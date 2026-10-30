@@ -67,6 +67,7 @@ from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, lazyload, mapped_column, reconstructor, relationship
 from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
 from sqlalchemy.orm.exc import DetachedInstanceError, ObjectDeletedError
+
 from sqlalchemy import or_
 from airflow.sdk.definitions.deadline import (
     REFERENCE_TIMING_FIELD,)
@@ -229,8 +230,7 @@ def _recalculate_dagrun_queued_at_deadlines(
         & (
             DeadlineAlertModel.reference[ReferenceModels.REFERENCE_TYPE_FIELD].as_string()
             == ReferenceModels.DagRunQueuedAtDeadline.__name__
-        )
-    )
+        ) )
     results = session.execute(
         select(Deadline, DeadlineAlertModel)
         .join(DeadlineAlertModel, Deadline.deadline_alert_id == DeadlineAlertModel.id)
