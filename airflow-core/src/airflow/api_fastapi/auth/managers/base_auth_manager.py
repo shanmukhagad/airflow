@@ -23,6 +23,8 @@ from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from enum import Enum
 from functools import cache
+from contextlib import suppress     
+from sqlalchemy.exc import SQLAlchemyError  
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from jwt import InvalidTokenError
@@ -51,6 +53,7 @@ from airflow.models.team import Team, dag_bundle_team_association_table
 from airflow.typing_compat import Unpack
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.session import NEW_SESSION, provide_session
+from airflow import settings
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -151,7 +154,7 @@ class BaseAuthManager(Generic[T], LoggingMixin, metaclass=ABCMeta):
             log.error("JWT token is not valid: %s", e)
             raise e
 
-        if (jti := payload.get("jti")) and RevokedToken.is_revoked(jti):
+        if (jti := payload.get("jti")) and self._is_the_token_revoked(jti):
             raise InvalidTokenError("Token has been revoked")
 
         try:
@@ -160,6 +163,29 @@ class BaseAuthManager(Generic[T], LoggingMixin, metaclass=ABCMeta):
             log.error("Couldn't deserialize user from token, JWT token is not valid: %s", e)
             raise InvalidTokenError(str(e))
 
+    @staticmethod
+    def _is_the_token_revoked(jti: str) -> bool:
+        """Return whether the token JTI has been revoked, retrying once after a database session failure."""
+        for attempt in range(2):
+
+            try:
+                return RevokedToken.is_revoked(jti)
+            except SQLAlchemyError:
+                if (session_registry := settings.Session) is not None:
+                    with suppress(Exception):
+                        session_registry.remove()
+                
+                if attempt == 1:
+                    raise
+                
+                log.warning(
+                    "Revoked-token check failed on a stale DB session; "
+                    "discarding the session and retrying once.",
+                    exc_info=True,
+                )
+
+        raise RuntimeError("Unreachable")
+    
     def get_fastapi_middlewares(self) -> list[tuple[_MiddlewareFactory[Any], dict[str, Any]]]:
         """
         Return middlewares the auth manager wants registered on the main FastAPI app.
