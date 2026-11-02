@@ -70,9 +70,11 @@ from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
 from sqlalchemy.orm.exc import DetachedInstanceError, ObjectDeletedError
 
 from sqlalchemy import or_
-from airflow.sdk.definitions.deadline import (
+from airflow.sdk.definitions.constants import (
     DAGRUN_QUEUED_TIMING,
-    REFERENCE_TIMING_FIELD,)
+    REFERENCE_TIMING_FIELD,
+    REFERENCE_TYPE_FIELD,
+)
 from airflow import settings
 from airflow._shared.observability.metrics import stats
 from airflow._shared.observability.traces import (

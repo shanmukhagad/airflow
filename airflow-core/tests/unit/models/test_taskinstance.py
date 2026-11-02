@@ -130,6 +130,11 @@ from tests_common.test_utils.taskinstance import (
     run_task_instance,
 )
 from unit.models import DEFAULT_DATE
+from airflow.sdk.definitions.constants import (
+    DAGRUN_QUEUED_TIMING,
+    REFERENCE_TIMING_FIELD,
+    REFERENCE_TYPE_FIELD,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -4292,23 +4297,21 @@ def test_get_new_task_ids_uses_ti_rows(mock_dagbag_cls, mock_select):
 
     assert sorted(new_task_ids) == ["task_b", "task_c"]
 
-def test_recalculate_dagrun_queued_at_deadlines_with_custom_reference(
-    dag_maker, session
-):
+def test_recalculate_dagrun_queued_at_deadlines_with_custom_reference(dag_maker, session):
     with dag_maker(dag_id="test_custom_queued_deadline"):
         EmptyOperator(task_id="task_1")
+
     dagrun = dag_maker.create_dagrun()
     serialized_dag_id = session.scalar(
-        select(SerializedDagModel.id).where(
-            SerializedDagModel.dag_id == dagrun.dag_id
-        ))
+        select(SerializedDagModel.id).where(SerializedDagModel.dag_id == dagrun.dag_id)
+    )
     original_queued_at = timezone.utcnow() - datetime.timedelta(hours=2)
     new_queued_at = original_queued_at + datetime.timedelta(hours=1)
     dagrun.queued_at = original_queued_at
     session.flush()
 
     deadline_configs = [
-        ("MyCustomQueuedReference", "DAGRUN_QUEUED"),
+        ("MyCustomQueuedReference", DAGRUN_QUEUED_TIMING),
         ("MyCustomCreatedReference", "DAGRUN_CREATED"),
     ]
     deadlines = {}
@@ -4318,35 +4321,42 @@ def test_recalculate_dagrun_queued_at_deadlines_with_custom_reference(
         alert = DeadlineAlertModel(
             serialized_dag_id=serialized_dag_id,
             reference={
-                "reference_type": reference_type,
-                "reference_timing": reference_timing,
+                REFERENCE_TYPE_FIELD: reference_type,
+                REFERENCE_TIMING_FIELD: reference_timing,
             },
             interval=interval.total_seconds(),
             callback_def={
                 "path": f"{__name__}.empty_callback_for_deadline",
                 "kwargs": {},
-            },)
+            },
+        )
         session.add(alert)
         session.flush()
+
         deadline = Deadline(
             dagrun_id=dagrun.id,
             deadline_alert_id=alert.id,
             deadline_time=original_queued_at + interval,
             callback=AsyncCallback(empty_callback_for_deadline),
-            dag_id=dagrun.dag_id,)
+            dag_id=dagrun.dag_id,
+        )
         session.add(deadline)
         session.flush()
         deadlines[reference_type] = deadline
+
     _recalculate_dagrun_queued_at_deadlines(
         dagrun,
         new_queued_at,
-        session,)
+        session,
+    )
     session.flush()
+
     queued_deadline = deadlines["MyCustomQueuedReference"]
     created_deadline = deadlines["MyCustomCreatedReference"]
 
     session.refresh(queued_deadline)
     session.refresh(created_deadline)
+
     assert queued_deadline.deadline_time == (
         new_queued_at + datetime.timedelta(minutes=30)
     )
@@ -4354,45 +4364,52 @@ def test_recalculate_dagrun_queued_at_deadlines_with_custom_reference(
         original_queued_at + datetime.timedelta(minutes=30)
     )
 
-def test_recalculate_dagrun_queued_at_deadlines_legacy_fallback(
-    dag_maker, session
-):
+
+def test_recalculate_dagrun_queued_at_deadlines_legacy_fallback(dag_maker, session):
     with dag_maker(dag_id="test_legacy_queued_deadline"):
         EmptyOperator(task_id="task_1")
+
     dagrun = dag_maker.create_dagrun()
     serialized_dag_id = session.scalar(
-        select(SerializedDagModel.id).where(
-            SerializedDagModel.dag_id == dagrun.dag_id
-        ))
+        select(SerializedDagModel.id).where(SerializedDagModel.dag_id == dagrun.dag_id)
+    )
     original_queued_at = timezone.utcnow() - datetime.timedelta(hours=2)
     new_queued_at = original_queued_at + datetime.timedelta(hours=1)
     dagrun.queued_at = original_queued_at
     session.flush()
+
     interval = datetime.timedelta(hours=1)
     alert = DeadlineAlertModel(
         serialized_dag_id=serialized_dag_id,
         reference={
-            "reference_type": "DagRunQueuedAtDeadline",
+            REFERENCE_TYPE_FIELD: "DagRunQueuedAtDeadline",
+            # Intentionally omitting REFERENCE_TIMING_FIELD to test legacy fallback
         },
         interval=interval.total_seconds(),
         callback_def={
             "path": f"{__name__}.empty_callback_for_deadline",
             "kwargs": {},
-        },)
+        },
+    )
     session.add(alert)
     session.flush()
+
     deadline = Deadline(
         dagrun_id=dagrun.id,
         deadline_alert_id=alert.id,
         deadline_time=original_queued_at + interval,
         callback=AsyncCallback(empty_callback_for_deadline),
-        dag_id=dagrun.dag_id,)
+        dag_id=dagrun.dag_id,
+    )
     session.add(deadline)
     session.flush()
+
     _recalculate_dagrun_queued_at_deadlines(
         dagrun,
         new_queued_at,
-        session,)
+        session,
+    )
     session.flush()
     session.refresh(deadline)
+
     assert deadline.deadline_time == new_queued_at + interval

@@ -22,6 +22,12 @@ from abc import ABC
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, overload
+from airflow.sdk.definitions.constants import (
+    DAGRUN_CREATED_TIMING,
+    DAGRUN_QUEUED_TIMING,
+    REFERENCE_TIMING_FIELD,
+    REFERENCE_TYPE_FIELD,
+)
 
 import attrs
 
@@ -35,14 +41,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Field name used in serialization - must be in sync with SerializedReferenceModels.REFERENCE_TYPE_FIELD
-REFERENCE_TYPE_FIELD = "reference_type"
-
-REFERENCE_TIMING_FIELD = "reference_timing"
-
-# Lifecycle timing categories
-DAGRUN_CREATED_TIMING = "DAGRUN_CREATED"
-DAGRUN_QUEUED_TIMING = "DAGRUN_QUEUED"
 
 class BaseDeadlineReference(ABC):
     """
