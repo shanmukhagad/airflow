@@ -61,6 +61,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.mutable import MutableDict
@@ -70,6 +71,7 @@ from sqlalchemy.orm.exc import DetachedInstanceError, ObjectDeletedError
 
 from sqlalchemy import or_
 from airflow.sdk.definitions.deadline import (
+    DAGRUN_QUEUED_TIMING,
     REFERENCE_TIMING_FIELD,)
 from airflow import settings
 from airflow._shared.observability.metrics import stats
@@ -221,7 +223,7 @@ def _recalculate_dagrun_queued_at_deadlines(
     """
     timing_filter = (
         DeadlineAlertModel.reference[REFERENCE_TIMING_FIELD].as_string()
-        == "DAGRUN_QUEUED"
+        == DAGRUN_QUEUED_TIMING
     )
 
     # 2. Legacy fallback for existing DB rows written prior to this change
@@ -231,15 +233,24 @@ def _recalculate_dagrun_queued_at_deadlines(
             DeadlineAlertModel.reference[ReferenceModels.REFERENCE_TYPE_FIELD].as_string()
             == ReferenceModels.DagRunQueuedAtDeadline.__name__
         ) )
-    results = session.execute(
-        select(Deadline, DeadlineAlertModel)
-        .join(DeadlineAlertModel, Deadline.deadline_alert_id == DeadlineAlertModel.id)
-        .where(
-            Deadline.dagrun_id == dagrun.id,
-            Deadline.missed == false(),
-            or_(timing_filter, legacy_fallback),
+    try:
+        results = session.execute(
+            select(Deadline, DeadlineAlertModel)
+            .join(DeadlineAlertModel, Deadline.deadline_alert_id == DeadlineAlertModel.id)
+            .where(
+                Deadline.dagrun_id == dagrun.id,
+                Deadline.missed == false(),
+                or_(timing_filter, legacy_fallback),
+            )
+        ).all()
+
+    except SQLAlchemyError:
+        log.exception(
+            "Database error while querying deadlines for DagRun %s.%s during queued_at recalculation",
+            dagrun.dag_id,
+            dagrun.run_id,
         )
-    ).all()
+        raise
 
     if not results:
         return

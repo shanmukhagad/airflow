@@ -40,6 +40,10 @@ REFERENCE_TYPE_FIELD = "reference_type"
 
 REFERENCE_TIMING_FIELD = "reference_timing"
 
+# Lifecycle timing categories
+DAGRUN_CREATED_TIMING = "DAGRUN_CREATED"
+DAGRUN_QUEUED_TIMING = "DAGRUN_QUEUED"
+
 class BaseDeadlineReference(ABC):
     """
     Base class for all Deadline Reference implementations.
@@ -98,7 +102,7 @@ class DagRunLogicalDateDeadline(BaseDeadlineReference):
 class DagRunQueuedAtDeadline(BaseDeadlineReference):
     """A deadline that returns when a DagRun was queued."""
 
-    reference_timing: str = "DAGRUN_QUEUED"
+    reference_timing: str = DAGRUN_QUEUED_TIMING
 
 @dataclass
 class FixedDatetimeDeadline(BaseDeadlineReference):
@@ -320,21 +324,21 @@ class DeadlineReference:
         # Add to appropriate deadline_reference_type classification
         if (
             deadline_reference_type is cls.TYPES.DAGRUN_QUEUED
-            or deadline_reference_type == "DAGRUN_QUEUED"
+            or deadline_reference_type == DAGRUN_QUEUED_TIMING
             or (
                 isinstance(deadline_reference_type, tuple)
                 and DagRunQueuedAtDeadline in deadline_reference_type
             )):
-            timing_val = "DAGRUN_QUEUED"
+            timing_val = DAGRUN_QUEUED_TIMING
             cls.TYPES.DAGRUN_QUEUED = cls.TYPES.DAGRUN_QUEUED + (reference_class,)
         elif (
             deadline_reference_type is cls.TYPES.DAGRUN_CREATED
-            or deadline_reference_type == "DAGRUN_CREATED"
+            or deadline_reference_type == DAGRUN_QUEUED_TIMING
             or (
                 isinstance(deadline_reference_type, tuple)
                 and DagRunLogicalDateDeadline in deadline_reference_type
             )):
-            timing_val = "DAGRUN_CREATED"
+            timing_val = DAGRUN_CREATED_TIMING
             cls.TYPES.DAGRUN_CREATED = cls.TYPES.DAGRUN_CREATED + (reference_class,)
         else:   
             raise ValueError(
