@@ -22,7 +22,7 @@ from unittest import mock
 import pytest
 from task_sdk.definitions.test_callback import (TEST_CALLBACK_KWARGS, TEST_CALLBACK_PATH, UNIMPORTABLE_DOT_PATH,)
 from airflow.sdk.definitions.callback import AsyncCallback, SyncCallback
-from airflow.sdk.definitions.deadline import DeadlineAlert, DeadlineReference, VariableInterval
+from airflow.sdk.definitions.deadline import BaseDeadlineReference, DagRunQueuedAtDeadline, DeadlineAlert, DeadlineReference, VariableInterval
 from airflow.sdk.definitions.variable import Variable
 from airflow.sdk.exceptions import AirflowRuntimeError
 from airflow.sdk.definitions.constants import (
