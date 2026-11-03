@@ -37,7 +37,6 @@ import psutil
 import pytest
 import time_machine
 from sqlalchemy import Delete, delete, func, inspect, select, update
-from sqlalchemy import Delete, delete, func, inspect, select, update
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import joinedload
 
