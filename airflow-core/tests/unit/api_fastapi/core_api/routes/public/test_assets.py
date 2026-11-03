@@ -701,6 +701,52 @@ class TestGetAssets(TestAssets):
         response_data = response.json()
         assert len(response_data["assets"]) == expected_num
 
+    @pytest.mark.parametrize(
+        ("params", "expected_assets"),
+        [
+            pytest.param(
+                {"has_events": "true"},
+                {"s3://bucket/key/1", "s3://bucket/key/2"},
+                id="has_events",
+            ),
+            pytest.param({"has_events": "false"}, {"s3://bucket/key/3"}, id="no_events"),
+            pytest.param(
+                {},
+                {"s3://bucket/key/1", "s3://bucket/key/2", "s3://bucket/key/3"},
+                id="not_set",
+            ),
+            pytest.param(
+                {"has_events": "true", "uri_pattern": "key/3"},
+                set(),
+                id="combined_with_uri_pattern",
+            ),
+        ],
+    )
+    @provide_session
+    def test_filter_assets_by_has_events_works(self, test_client, params, expected_assets, *, session):
+        self.create_assets(num=3)
+        self.create_assets_events(num=2)
+        session.add(
+            AssetEvent(
+                id=3,
+                asset_id=1,
+                extra={"foo": "bar"},
+                source_task_id="source_task_id",
+                source_dag_id="source_dag_id",
+                source_run_id="source_run_id_3",
+                timestamp=DEFAULT_DATE + timedelta(days=1),
+            )
+        )
+        session.commit()
+
+        response = test_client.get("/assets", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        asset_uris = [asset["uri"] for asset in body["assets"]]
+        assert set(asset_uris) == expected_assets
+        assert len(asset_uris) == len(expected_assets)
+        assert body["total_entries"] == len(expected_assets)
+
 
 class TestGetAssetsEndpointPagination(TestAssets):
     @pytest.mark.parametrize(

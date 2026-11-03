@@ -113,6 +113,18 @@ paths:
           type: boolean
           default: true
           title: Only Active
+      - name: has_events
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: Only assets with at least one asset event (true) or with none
+            (false).
+          title: Has Events
+        description: Only assets with at least one asset event (true) or with none
+          (false).
       - name: order_by
         in: query
         required: false
