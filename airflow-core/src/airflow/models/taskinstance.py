@@ -543,6 +543,14 @@ def clear_task_instances(
 
     for ti in tis:
         ti.context_carrier = new_task_run_carrier(ti.dag_run.context_carrier)
+
+    if not keep_task_state and tis:
+        from airflow.api_fastapi.core_api.services.public.task_instances import _discard_task_state_store
+        _discard_task_state_store(
+            tis=tis,
+            session=session,
+            event="Discarded task state on clear",
+        )
     session.flush()
 
 
