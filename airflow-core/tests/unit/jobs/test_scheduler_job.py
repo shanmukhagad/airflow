@@ -36,7 +36,7 @@ import pendulum
 import psutil
 import pytest
 import time_machine
-from sqlalchemy import delete, func, inspect, select, update
+from sqlalchemy import Delete, delete, func, inspect, select, update
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import joinedload
 
@@ -8454,6 +8454,40 @@ class TestSchedulerJob:
         assert asset in active
         assert asset not in orphaned
 
+    def test_asset_orphaning_delete_has_no_cte(self, dag_maker, session):
+        """MySQL-compatible backends such as Vitess reject a WITH clause in a DELETE statement."""
+        self.job_runner = SchedulerJobRunner(job=Job())
+
+        asset1 = Asset(uri="test://asset_1", name="test_asset_1", group="test_group")
+
+        with dag_maker(dag_id="assets-1", schedule=[asset1], session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        with dag_maker(dag_id="assets-1", schedule=None, session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        with mock.patch.object(
+            session, "execute", autospec=True, side_effect=session.execute
+        ) as mock_execute:
+            self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        asset_active_deletes = [
+            call.args[0]
+            for call in mock_execute.call_args_list
+            if isinstance(call.args[0], Delete) and call.args[0].table == AssetActive.__table__
+        ]
+        assert len(asset_active_deletes) == 1
+        assert "WITH" not in str(asset_active_deletes[0].compile(dialect=mysql.dialect()))
+
+        orphaned, active = self._find_assets_activation(session)
+        assert active == []
+        assert orphaned == [asset1]
+
+
     def test_asset_orphaning_ignore_orphaned_assets(self, dag_maker, session):
         self.job_runner = SchedulerJobRunner(job=Job())
 
@@ -10116,8 +10150,8 @@ def test_schedule_dag_run_with_upstream_skip(dag_maker, session):
     assert tis[dummy1.task_id].state == State.SKIPPED
     assert tis[dummy2.task_id].state == State.SUCCESS
     # dummy3 should be skipped because dummy1 is skipped.
-    assert tis[dummy3.task_id].state == State.SKIPPED
-
+    assert tis[dummy3.task_id].state == State.SKIPPED    
+    
     def test_start_queued_dagruns_uses_latest_max_active_runs_from_dag_model(self, dag_maker, session):
         """
         Test that _start_queued_dagruns uses max_active_runs from DagModel (via dag_run)
