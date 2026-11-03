@@ -306,6 +306,7 @@ class KubernetesPodOperator(BaseOperator):
         self,
         *,
         kubernetes_conn_id: str | None = KubernetesHook.default_conn_name,
+        startup_preemption_retry_attempts: int | None = None,
         namespace: str | None = None,
         image: str | None = None,
         name: str | None = None,
@@ -389,7 +390,18 @@ class KubernetesPodOperator(BaseOperator):
         self.labels = labels or {}
         self.startup_timeout_seconds = startup_timeout_seconds
         self.startup_check_interval_seconds = startup_check_interval_seconds
-        # New parameter startup_timeout_seconds adds breaking change, to handle this as smooth as possible just reuse startup time
+
+        # Configurable retry attempts with Airflow configuration fallback:
+        self.startup_preemption_retry_attempts = (
+            startup_preemption_retry_attempts
+            if startup_preemption_retry_attempts is not None
+            else conf.getint(
+                "kubernetes_executor",
+                "startup_preemption_retry_attempts",
+                fallback= 3 ,
+            )
+        )
+
         self.schedule_timeout_seconds = schedule_timeout_seconds or startup_timeout_seconds
         env_vars = convert_env_vars(env_vars) if env_vars else []
         self.env_vars = env_vars
@@ -410,8 +422,6 @@ class KubernetesPodOperator(BaseOperator):
         self.cluster_context = cluster_context
         self.reattach_on_restart = reattach_on_restart
         self.get_logs = get_logs
-        # Fallback to the class variable BASE_CONTAINER_NAME here instead of via default argument value
-        # in the init method signature, to be compatible with subclasses overloading the class variable value.
         self.base_container_name = base_container_name or self.BASE_CONTAINER_NAME
         self.base_container_status_polling_interval = base_container_status_polling_interval
         self.init_container_logs = init_container_logs
@@ -462,15 +472,12 @@ class KubernetesPodOperator(BaseOperator):
         self.log_pod_spec_on_failure = log_pod_spec_on_failure
         self.on_finish_action = OnFinishAction(on_finish_action)
         self.on_kill_action = OnKillAction(on_kill_action)
-        # The `is_delete_operator_pod` parameter should have been removed in provider version 10.0.0.
-        # TODO: remove it from here and from the operator's parameters list when the next major version bumped
         self._is_delete_operator_pod = self.on_finish_action == OnFinishAction.DELETE_POD
         self.termination_message_policy = termination_message_policy
         self.active_deadline_seconds = active_deadline_seconds
         self.logging_interval = logging_interval
         self.trigger_kwargs = trigger_kwargs
-
-        self._config_dict: dict | None = None  # TODO: remove it when removing convert_config_file_to_dict
+        self._config_dict: dict | None = None
         self._progress_callback = progress_callback
         self.callbacks = [] if not callbacks else callbacks if isinstance(callbacks, list) else [callbacks]
         self._killed: bool = False
@@ -677,10 +684,11 @@ class KubernetesPodOperator(BaseOperator):
 
     # added new method 
     def _await_pod_start_or_relaunch(self, context: Context) -> None:
-        '''Waits for the pod to start normally, but automatically creates and launches a replacement pod if the original one disappears 
-          (returns a 404 error) before it even starts running.'''
-        # 3 attempts
-        for attempt in range(_POD_PREEMPTION_MAX_ATTEMPTS):
+        """Waits for the pod to start normally, but automatically creates and launches a replacement pod if the original one disappears 
+        (returns a 404 error) before it even starts running."""
+        max_attempts = max(1, self.startup_preemption_retry_attempts)
+
+        for attempt in range(max_attempts):
             try:
                 self.await_pod_start(pod=self.pod)
                 return 
@@ -688,11 +696,11 @@ class KubernetesPodOperator(BaseOperator):
             except ApiException as exc: 
                 observed_started = getattr(self.pod_manager, "_startup_observed_started", False)
                 
-                #  fail if ANY of these 3 are true:
+                # Fail if ANY of these 3 are true:
                 if (
                     str(exc.status) != "404"   
                     or observed_started       
-                    or attempt == _POD_PREEMPTION_MAX_ATTEMPTS - 1 
+                    or attempt == max_attempts - 1 
                 ):
                     raise 
 
@@ -700,10 +708,10 @@ class KubernetesPodOperator(BaseOperator):
                 "Pod %s disappeared before it started. Launching a replacement (%s/%s).",
                 self.pod.metadata.name,
                 attempt + 2,
-                _POD_PREEMPTION_MAX_ATTEMPTS,
+                max_attempts,
             )
             
-            # Create (clone) of the original pod configuration.
+            # Create clone of the original pod configuration
             replacement = copy.deepcopy(self.pod_request_obj)
             
             # Add suffix to pod
@@ -716,17 +724,31 @@ class KubernetesPodOperator(BaseOperator):
             ti = context["ti"]
             ti.xcom_push(key="pod_name", value=self.pod.metadata.name)
             ti.xcom_push(key="pod_namespace", value=self.pod.metadata.namespace)
-            self.remote_pod = self.find_pod(self.pod.metadata.namespace, context=context)
+
+            # Safely fetch remote_pod
+            try:
+                self.remote_pod = self.find_pod(self.pod.metadata.namespace, context=context)
+            except ApiException as exc:
+                if str(exc.status) == "404":
+                    self.log.warning(
+                        "Replacement pod %s disappeared immediately after creation.",
+                        self.pod.metadata.name,
+                    )
+                    self.remote_pod = None
+                else:
+                    raise
+
+            # Fall back to self.pod
+            target_pod = self.remote_pod or self.pod
             
             for callback in self.callbacks:
                 callback.on_pod_creation(
-                    pod=self.remote_pod,
+                    pod=target_pod,
                     client=self.client,
                     mode=ExecutionMode.SYNC,
                     context=context,
                     operator=self,
                 )
-
     
     def extract_xcom(self, pod: k8s.V1Pod) -> dict[Any, Any] | None:
         """Retrieve xcom value and kill xcom sidecar container."""
