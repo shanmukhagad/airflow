@@ -61,6 +61,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.mutable import MutableDict
@@ -68,6 +69,12 @@ from sqlalchemy.orm import Mapped, lazyload, mapped_column, reconstructor, relat
 from sqlalchemy.orm.attributes import NO_VALUE, set_committed_value
 from sqlalchemy.orm.exc import DetachedInstanceError, ObjectDeletedError
 
+from sqlalchemy import or_
+from airflow.sdk.definitions.constants import (
+    DAGRUN_QUEUED_TIMING,
+    REFERENCE_TIMING_FIELD,
+    REFERENCE_TYPE_FIELD,
+)
 from airflow import settings
 from airflow._shared.observability.metrics import stats
 from airflow._shared.observability.traces import (
@@ -86,6 +93,7 @@ from airflow.models.base import Base, StringID, TaskInstanceDependencies
 from airflow.models.dag_version import DagVersion
 from airflow.models.deadline import Deadline, ReferenceModels
 from airflow.models.deadline_alert import DeadlineAlert as DeadlineAlertModel
+from airflow.sdk.definitions.deadline import REFERENCE_TIMING_FIELD
 
 # Import HITLDetail at runtime so SQLAlchemy can resolve the relationship
 from airflow.models.hitl import HITLDetail  # noqa: F401
@@ -215,16 +223,36 @@ def _recalculate_dagrun_queued_at_deadlines(
 
     :meta private:
     """
-    results = session.execute(
-        select(Deadline, DeadlineAlertModel)
-        .join(DeadlineAlertModel, Deadline.deadline_alert_id == DeadlineAlertModel.id)
-        .where(
-            Deadline.dagrun_id == dagrun.id,
-            Deadline.missed == false(),
+    timing_filter = (
+        DeadlineAlertModel.reference[REFERENCE_TIMING_FIELD].as_string()
+        == DAGRUN_QUEUED_TIMING
+    )
+
+    # 2. Legacy fallback for existing DB rows written prior to this change
+    legacy_fallback = (
+        DeadlineAlertModel.reference[REFERENCE_TIMING_FIELD].is_(None)
+        & (
             DeadlineAlertModel.reference[ReferenceModels.REFERENCE_TYPE_FIELD].as_string()
-            == ReferenceModels.DagRunQueuedAtDeadline.__name__,
+            == ReferenceModels.DagRunQueuedAtDeadline.__name__
+        ) )
+    try:
+        results = session.execute(
+            select(Deadline, DeadlineAlertModel)
+            .join(DeadlineAlertModel, Deadline.deadline_alert_id == DeadlineAlertModel.id)
+            .where(
+                Deadline.dagrun_id == dagrun.id,
+                Deadline.missed == false(),
+                or_(timing_filter, legacy_fallback),
+            )
+        ).all()
+
+    except SQLAlchemyError:
+        log.exception(
+            "Database error while querying deadlines for DagRun %s.%s during queued_at recalculation",
+            dagrun.dag_id,
+            dagrun.run_id,
         )
-    ).all()
+        raise
 
     if not results:
         return
