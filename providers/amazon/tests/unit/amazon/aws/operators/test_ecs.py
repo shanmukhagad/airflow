@@ -816,6 +816,18 @@ class TestEcsRunTaskOperator(EcsBaseTestCase):
         assert isinstance(deferred.value.trigger, TaskDoneTrigger)
         assert deferred.value.trigger.task_arn == f"arn:aws:ecs:us-east-1:012345678910:task/{TASK_ID}"
 
+    @mock.patch("airflow.providers.amazon.aws.operators.ecs.AwsTaskLogFetcher")
+    def test_get_task_log_fetcher_passes_on_log_event(self, log_fetcher_mock):
+        callback = mock.Mock()
+        self.ecs.awslogs_group = "test/log/group"
+        self.ecs.awslogs_stream_prefix = "prefix"
+        self.ecs.on_log_event = callback
+
+        self.ecs._get_task_log_fetcher()
+
+        assert log_fetcher_mock.call_args.kwargs["on_log_event"] is callback
+        assert log_fetcher_mock.call_args.kwargs["logger"] is self.ecs.log
+
     @mock.patch.object(EcsRunTaskOperator, "client", new_callable=PropertyMock)
     def test_execute_complete(self, client_mock):
         event = {"status": "success", "task_arn": "my_arn", "cluster": "test_cluster"}

@@ -169,6 +169,42 @@ def test_statement_latest_runs_partitioned_sorted_by_partition_date(dag_maker, s
 
 
 @pytest.mark.db_test
+class TestDagModelOperation:
+    @pytest.mark.usefixtures("testing_dag_bundle")
+    def test_find_orm_dags_eagerly_loads_relationships(self, dag_maker, session):
+        asset_1 = Asset("asset_1")
+        asset_2 = Asset("asset_2")
+
+        with dag_maker(dag_id="test_dag", schedule=[asset_1, asset_2]) as dag:
+            EmptyOperator(task_id="produce", outlets=[asset_1, asset_2])
+
+        dags = {dag.dag_id: LazyDeserializedDAG.from_dag(dag)}
+        orm_dags = DagModelOperation(dags, "testing", None).add_dags(session=session)
+
+        asset_op = AssetModelOperation.collect(dags)
+        orm_assets = asset_op.sync_assets(session=session)
+        session.flush()
+
+        asset_op.add_dag_asset_references(orm_dags, orm_assets, session=session)
+        asset_op.add_task_asset_references(orm_dags, orm_assets, session=session)
+        session.flush()
+
+        session.expire_all()
+        orm_dag = DagModelOperation(dags, "testing", None).find_orm_dags(session=session)["test_dag"]
+
+        assert {
+            "tags",
+            "schedule_asset_references",
+            "schedule_asset_alias_references",
+            "task_outlet_asset_references",
+            "dag_owner_links",
+        }.isdisjoint(sa_inspect(orm_dag).unloaded)
+
+        assert len(orm_dag.schedule_asset_references) == 2
+        assert len(orm_dag.task_outlet_asset_references) == 2
+
+
+@pytest.mark.db_test
 class TestAssetModelOperation:
     @staticmethod
     def clean_db():

@@ -1082,6 +1082,8 @@ def update_config(args) -> None:
                 comment_out_defaults=True,
                 include_descriptions=True,
                 modifications=modifications,
+                hide_sensitive_values=True,
+
             )
             new_config = config_output.getvalue()
         console.print(new_config)
@@ -1092,6 +1094,8 @@ def update_config(args) -> None:
                 comment_out_defaults=True,
                 include_descriptions=True,
                 modifications=modifications,
+                hide_sensitive_values=False,
+
             )
 
     if changes_applied:

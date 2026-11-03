@@ -237,3 +237,28 @@ class TestGetDAGSource:
             "version_number": 1,
             "dag_display_name": TEST_DAG_DISPLAY_NAME,
         }
+        
+    @mock.patch("airflow.api_fastapi.core_api.routes.public.dag_sources.get_auth_manager")
+    def test_source_is_returned_when_colocated_dag_is_stale(
+            self, mock_get_auth_manager, test_client, test_dag, colocated_unreadable_dag, session
+        ):
+            # Mark the co-located DAG as stale
+            colocated_unreadable_dag.is_stale = True
+            session.commit()
+
+            # User only has read access to TEST_DAG_ID, not the stale co-located DAG
+            mock_get_auth_manager.return_value.get_authorized_dag_ids.return_value = {TEST_DAG_ID}
+            dag_content = self._get_dag_file_code(test_dag.fileloc)
+
+            response: Response = test_client.get(
+                f"{API_PREFIX}/{TEST_DAG_ID}", headers={"Accept": "application/json"}
+            )
+
+            # Source code should NOT be redacted because the co-located DAG is stale
+            assert response.status_code == 200
+            assert response.json() == {
+                "content": dag_content,
+                "dag_id": TEST_DAG_ID,
+                "version_number": 1,
+                "dag_display_name": TEST_DAG_DISPLAY_NAME,
+            }

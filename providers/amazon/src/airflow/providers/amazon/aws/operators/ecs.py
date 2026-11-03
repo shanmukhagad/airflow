@@ -41,6 +41,7 @@ from airflow.providers.amazon.aws.utils.mixins import aws_template_fields
 from airflow.providers.amazon.aws.utils.task_log_fetcher import AwsTaskLogFetcher
 from airflow.providers.common.compat.sdk import AirflowException, AirflowSkipException, conf
 from airflow.utils.helpers import prune_dict
+from collections.abc import Callable, Container, Sequence
 
 if TYPE_CHECKING:
     import boto3
@@ -401,6 +402,8 @@ class EcsRunTaskOperator(EcsBaseOperator):
         Additionally, if logs are fetched, the last log message will be pushed to XCom with the key 'return_value'. (default: False)
     :param stop_task_on_failure: If True, attempt to stop the ECS task if the Airflow task fails
         after the ECS task has started. (default: True)
+    :param on_log_event: Optional callback invoked for each CloudWatch log event as it is read.
+        It receives the raw event dictionary and is called alongside the normal logger output.
     """
 
     ui_color = "#f0ede4"
@@ -466,6 +469,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
         deferrable: bool = conf.getboolean("operators", "default_deferrable", fallback=False),
         skip_on_exit_code: int | Container[int] | None = None,
         stop_task_on_failure: bool = True,
+        on_log_event: Callable[[dict[str, Any]], None] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -512,6 +516,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
             else []
         )
         self.stop_task_on_failure = stop_task_on_failure
+        self.on_log_event = on_log_event
 
         if self._aws_logs_enabled() and not self.wait_for_completion:
             self.log.warning(
@@ -746,6 +751,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
             log_stream_name=self._get_logs_stream_name(),
             fetch_interval=self.awslogs_fetch_interval,
             logger=self.log,
+            on_log_event=self.on_log_event,
         )
 
     def _check_success_task(self) -> None:

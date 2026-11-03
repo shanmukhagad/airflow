@@ -2248,3 +2248,42 @@ def test_ensure_fernet_is_generated(tmp_path, monkeypatch: pytest.MonkeyPatch):
 
     assert airflow.configuration._SecretKeys.fernet_key
     assert airflow.configuration._SecretKeys.fernet_key != "None"
+
+### Test that write_custom_config masks sensitive credentials when hide_sensitive_values=True.
+### This simulates the dry-run behavior of 'airflow config update'.
+
+def test_write_custom_config_masks_sensitive_credentials():
+
+    # Create a new config parser
+    test_conf = AirflowConfigParser()
+
+    # Inject all the sensitive credentials to test
+    test_conf.read_dict({
+        "core": {"fernet_key": "super_secret_fernet_12345="},
+        "database": {"sql_alchemy_conn": "postgresql://airflow:DB_PASS@localhost:5432/airflow"},
+        "webserver": {"secret_key": "my_secret_flask_key"}
+     
+    })
+
+    # Simulate the dry-run output (hide_sensitive_values = True)
+    output_buffer = StringIO()
+    test_conf.write_custom_config(file=output_buffer, hide_sensitive_values=True)
+    masked_result = output_buffer.getvalue()
+
+    # Assert that the REAL passwords are NO LONGER in the output
+    assert "super_secret_fernet_12345=" not in masked_result
+    assert "DB_PASS" not in masked_result
+    assert "my_secret_flask_key" not in masked_result
+
+    # Assert that they have been replaced with the '***' mask
+    assert "fernet_key = ***" in masked_result
+    assert "sql_alchemy_conn = ***" in masked_result
+    assert "secret_key = ***" in masked_result
+
+    # Simulate the actual disk write (hide_sensitive_values = False)
+    disk_buffer = StringIO()
+    test_conf.write_custom_config(file=disk_buffer, hide_sensitive_values=False)
+    unmasked_result = disk_buffer.getvalue()
+
+    assert "super_secret_fernet_12345=" in unmasked_result
+    assert "DB_PASS" in unmasked_result

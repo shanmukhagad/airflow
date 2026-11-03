@@ -207,7 +207,103 @@ class TestPostgresSanitize:
         finally:
             with settings.engine.begin() as conn:
                 conn.execute(sa.text(drop))
+@pytest.mark.backend("postgres")
+@pytest.mark.long_running
+def test_unconvertible_xcom_is_archived(self):
+    """Test that an XCom that cannot be converted to JSONB is archived."""
+    oversized_value = json.dumps({"key": "x" * 268435456})
 
+    with settings.engine.begin() as conn:
+        # Create the archive table using the migration's actual definition.
+        conn.execute(sa.text("DROP TABLE IF EXISTS _xcom_archive"))
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE _xcom_archive (
+                    dag_run_id INTEGER NOT NULL,
+                    task_id VARCHAR(250) NOT NULL,
+                    map_index INTEGER NOT NULL DEFAULT -1,
+                    key VARCHAR(512) NOT NULL,
+                    dag_id VARCHAR(250) NOT NULL,
+                    run_id VARCHAR(250) NOT NULL,
+                    value BYTEA,
+                    timestamp TIMESTAMP NOT NULL,
+                    PRIMARY KEY (dag_run_id, task_id, map_index, key)
+                )
+                """
+            )
+        )
+
+        # Insert the oversized value into the real xcom table.
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO xcom (
+                    dag_run_id,
+                    task_id,
+                    map_index,
+                    key,
+                    dag_id,
+                    run_id,
+                    value,
+                    timestamp
+                )
+                VALUES (
+                    1,
+                    'task1',
+                    -1,
+                    'return_value',
+                    'dag1',
+                    'run1',
+                    convert_to(:value, 'UTF8'),
+                    NOW()
+                )
+                """
+            ),
+            {"value": oversized_value},
+        )
+
+        # Run the helper we're testing.
+        _migration._archive_unconvertible_xcom_values(conn, "key")
+
+        # The oversized value should have been removed from xcom.
+        xcom_count = conn.execute(
+            sa.text(
+                """
+                SELECT COUNT(*)
+                FROM xcom
+                WHERE dag_id = 'dag1'
+                  AND task_id = 'task1'
+                  AND run_id = 'run1'
+                  AND key = 'return_value'
+                """
+            )
+        ).scalar_one()
+
+        assert xcom_count == 0
+
+        # The value should now exist in the archive.
+        archive_row = conn.execute(
+            sa.text(
+                """
+                SELECT dag_id, task_id, run_id, key, value
+                FROM _xcom_archive
+                WHERE dag_id = 'dag1'
+                  AND task_id = 'task1'
+                  AND run_id = 'run1'
+                  AND key = 'return_value'
+                """
+            )
+        ).one()
+
+        assert archive_row.dag_id == "dag1"
+        assert archive_row.task_id == "task1"
+        assert archive_row.run_id == "run1"
+        assert archive_row.key == "return_value"
+        assert len(archive_row.value) == len(oversized_value.encode("UTF-8"))
+
+        # Clean up the archive table created by this test.
+        conn.execute(sa.text("DROP TABLE _xcom_archive"))         
 
 @pytest.mark.db_test
 class TestMysqlSanitize:

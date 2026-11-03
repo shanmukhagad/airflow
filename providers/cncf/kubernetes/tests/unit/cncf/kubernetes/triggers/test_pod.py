@@ -24,8 +24,9 @@ import logging
 import time
 from asyncio import Future
 from unittest import mock
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pendulum
 import pytest
 from kubernetes.client import models as k8s
 from pendulum import DateTime
@@ -123,6 +124,7 @@ class TestKubernetesPodTrigger:
             "cluster_context": CLUSTER_CONTEXT,
             "config_dict": CONFIG_DICT,
             "in_cluster": IN_CLUSTER,
+            "init_container_logs": False,
             "get_logs": GET_LOGS,
             "startup_timeout": STARTUP_TIMEOUT_SECS,
             "startup_check_interval": STARTUP_CHECK_INTERVAL_SECS,
@@ -1022,3 +1024,91 @@ class TestKubernetesPodTrigger:
         ):
             await trigger.cleanup()
         mock_hook.delete_pod.assert_not_called()
+
+
+def test_pod_trigger_serialization_with_init_container_logs():
+    """Verify that init_container_logs is serialized properly."""
+    now = pendulum.now("UTC")
+    trigger = KubernetesPodTrigger(
+        pod_name="test-pod",
+        pod_namespace="default",
+        base_container_name="base",
+        trigger_start_time=now,
+        init_container_logs=True,
+    )
+    classpath, kwargs = trigger.serialize()
+
+    assert classpath == "airflow.providers.cncf.kubernetes.triggers.pod.KubernetesPodTrigger"
+    assert "init_container_logs" in kwargs
+    assert kwargs["init_container_logs"] is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_streams_init_container_logs_and_succeeds():
+    """Verify trigger fetches init container logs before base container execution."""
+    now = pendulum.now("UTC")
+    trigger = KubernetesPodTrigger(
+        pod_name="test-pod",
+        pod_namespace="default",
+        base_container_name="base",
+        trigger_start_time=now,
+        init_container_logs=True,
+        poll_interval=0.01,
+    )
+
+    init_container = MagicMock()
+    init_container.name = "init-step"
+
+    init_status = MagicMock()
+    init_status.name = "init-step"
+    init_status.state.running = False
+    init_status.state.terminated.exit_code = 0
+
+    pod = MagicMock()
+    pod.spec.init_containers = [init_container]
+    pod.status.init_container_statuses = [init_status]
+
+    trigger._get_pod = AsyncMock(return_value=pod)
+    trigger.pod_manager.fetch_container_logs_before_current_sec = AsyncMock(return_value=now)
+
+    result = await trigger._wait_for_init_containers_completion()
+
+    assert result is None
+    trigger.pod_manager.fetch_container_logs_before_current_sec.assert_called_with(
+        pod, container_name="init-step", since_time=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_trigger_init_container_fast_fail():
+    """Verify trigger emits failure event immediately if init container fails."""
+    now = pendulum.now("UTC")
+    trigger = KubernetesPodTrigger(
+        pod_name="test-pod",
+        pod_namespace="default",
+        base_container_name="base",
+        trigger_start_time=now,
+        init_container_logs=True,
+        poll_interval=0.01,
+    )
+
+    init_container = MagicMock()
+    init_container.name = "failing-init"
+
+    init_status = MagicMock()
+    init_status.name = "failing-init"
+    init_status.state.running = False
+    init_status.state.terminated.exit_code = 1
+
+    pod = MagicMock()
+    pod.spec.init_containers = [init_container]
+    pod.status.init_container_statuses = [init_status]
+
+    trigger._get_pod = AsyncMock(return_value=pod)
+    trigger.pod_manager.fetch_container_logs_before_current_sec = AsyncMock(return_value=now)
+
+    result = await trigger._wait_for_init_containers_completion()
+
+    assert isinstance(result, TriggerEvent)
+    assert result.payload["status"] == "failed"
+    assert "Init container failing-init failed with exit code 1" in result.payload["message"]

@@ -174,7 +174,7 @@ if TYPE_CHECKING:
     from airflow.sdk.definitions.connection import Connection
     from airflow.sdk.types import RuntimeTaskInstanceProtocol as RuntimeTI
 
-__all__ = ["ActivitySubprocess", "WatchedSubprocess", "supervise", "supervise_task"]
+__all__ = ["ActivitySubprocess", "CallbackSubprocess", "WatchedSubprocess", "supervise", "supervise_task"]
 
 log: FilteringBoundLogger = structlog.get_logger(logger_name="supervisor")
 
@@ -253,6 +253,10 @@ def _subprocess_main():
 
     main()
 
+def _callback_subprocess_main():
+    from airflow.sdk.execution_time.callback_runner import _main
+
+    _main()
 
 def _reset_signals():
     # Uninstall the rich etc. exception handler
@@ -531,7 +535,9 @@ def _child_exec_main():
     # log_fd=0 tells _fork_main to skip structured log channel setup.
     # Signal to the task runner to request it via ResendLoggingFD after startup.
     os.environ["_AIRFLOW_FORK_EXEC"] = "1"
-    _fork_main(child_requests, child_stdout, child_stderr, 0, _subprocess_main)
+    target_name = os.environ.get("_AIRFLOW_EXEC_TARGET", "_subprocess_main")
+    target = _callback_subprocess_main if target_name == "_callback_subprocess_main" else _subprocess_main
+    _fork_main(child_requests, child_stdout, child_stderr, 0, target)
 
 
 class NeverRaised(Exception):
@@ -682,9 +688,9 @@ class WatchedSubprocess:
             ``os.killpg``. Task execution opts in; DAG processor and triggerer
             keep the supervisor's process group and are signalled directly.
         """
-        if use_exec and target is not _subprocess_main:
+        if use_exec and target not in (_subprocess_main, _callback_subprocess_main):
             raise ValueError(
-                f"use_exec=True is only supported with target=_subprocess_main; got target={target!r}"
+                f"use_exec=True is only supported with importable targets (_subprocess_main, _callback_subprocess_main); got target={target!r}"
             )
         # Create socketpairs/"pipes" to connect to the stdin and out from the subprocess
         child_stdout, read_stdout = socketpair()
@@ -726,6 +732,7 @@ class WatchedSubprocess:
                     # dup2 copies the socketpairs onto FDs 0/1/2; os.dup2 clears
                     # FD_CLOEXEC on the destination FDs, so they survive exec.
                     # The log channel is requested later via ResendLoggingFD.
+                    os.environ["_AIRFLOW_EXEC_TARGET"] = target.__name__
                     os.dup2(child_requests.fileno(), 0)
                     os.dup2(child_stdout.fileno(), 1)
                     os.dup2(child_stderr.fileno(), 2)
@@ -2689,3 +2696,54 @@ def supervise(**kwargs) -> int:
         stacklevel=2,
     )
     return supervise_task(**kwargs)
+
+@attrs.define(kw_only=True)
+class CallbackSubprocess(WatchedSubprocess):
+    """Subprocess manager dedicated to running task callbacks."""
+
+    callback_request: Any = attrs.field(default=None)
+    use_exec: bool = attrs.field(default=False)
+
+    def __init__(
+        self,
+        callback_request: Any = None,
+        use_exec: bool | None = None,
+        **kwargs: Any,
+    ):
+        if use_exec is None:
+            use_exec = conf.getboolean("core", "execute_tasks_new_python_interpreter", fallback=False)
+
+        kwargs.setdefault("id", getattr(callback_request, "id", UUID("00000000-0000-0000-0000-000000000000")))
+        kwargs.setdefault("pid", os.getpid())
+        s1, _ = socketpair()
+        kwargs.setdefault("stdin", s1)
+        kwargs.setdefault("process", PsutilTracker(psutil.Process()))
+        kwargs.setdefault("process_log", log)
+
+        super().__init__(**kwargs)
+        self.callback_request = callback_request
+        self.use_exec = use_exec
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        callback_request: Any = None,
+        logger: FilteringBoundLogger | None = None,
+        use_exec: bool | None = None,
+        **kwargs,
+    ) -> Self:
+        if use_exec is None:
+            use_exec = conf.getboolean("core", "execute_tasks_new_python_interpreter", fallback=False)
+
+        target = _callback_subprocess_main
+
+        kwargs.setdefault("id", getattr(callback_request, "id", UUID("00000000-0000-0000-0000-000000000000")))
+
+        return super().start(
+            target=target,
+            logger=logger,
+            use_exec=use_exec,
+            callback_request=callback_request,
+            **kwargs,
+        )

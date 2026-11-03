@@ -46,6 +46,8 @@ from airflow.providers.amazon.aws.utils import trim_none_values, validate_execut
 from airflow.providers.amazon.aws.utils.mixins import aws_template_fields
 from airflow.providers.amazon.aws.utils.task_log_fetcher import AwsTaskLogFetcher
 from airflow.providers.common.compat.sdk import AirflowException, conf
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from airflow.sdk import Context
@@ -171,6 +173,7 @@ class BatchOperator(AwsBaseOperator[BatchClientHook]):
         poll_interval: int = 30,
         awslogs_enabled: bool = False,
         awslogs_fetch_interval: timedelta = timedelta(seconds=30),
+        on_log_event: Callable[[dict[str, Any]], None] | None = None,
         submit_job_timeout: int | None = None,
         **kwargs,
     ) -> None:
@@ -196,9 +199,9 @@ class BatchOperator(AwsBaseOperator[BatchClientHook]):
         self.poll_interval = poll_interval
         self.awslogs_enabled = awslogs_enabled
         self.awslogs_fetch_interval = awslogs_fetch_interval
+        self.on_log_event = on_log_event
         self.submit_job_timeout = submit_job_timeout
 
-        # params for hook
         self.max_retries = max_retries
         self.status_retries = status_retries
 
@@ -422,6 +425,7 @@ class BatchOperator(AwsBaseOperator[BatchClientHook]):
             log_stream_name=awslog_info["awslogs_stream_name"],
             fetch_interval=self.awslogs_fetch_interval,
             logger=self.log,
+            on_log_event=self.on_log_event,
         )
 
 

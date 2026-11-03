@@ -4919,6 +4919,43 @@ class TestApplyPartitionDateWindowSubDay:
         )
         assert cleared == 3
 
+
+def test_mapped_expansion_with_detached_dag_run(dag_maker, session):
+    dag, mapped, dr = _make_mapped_dag_for_expansion(dag_maker, session, dag_id="test_detached_dag_run")
+
+    # Get the unmapped TaskInstance that expand_mapped_task will use.
+    unmapped_ti = session.scalar(
+        select(TI).where(
+            TI.dag_id == dag.dag_id,
+            TI.task_id == mapped.task_id,
+            TI.run_id == dr.run_id,
+            TI.map_index == -1,
+        )
+    )
+
+    assert unmapped_ti is not None
+
+    # The relationship is eagerly joined, so the DagRun is initially available.
+    detached_dr = unmapped_ti.dag_run
+    assert detached_dr is not None
+
+    # Explicitly detach the DagRun from SQLAlchemy.
+    session.expire(detached_dr, ["context_carrier"])
+    session.expunge(detached_dr)
+
+    assert sa_inspect(detached_dr).detached
+    assert "context_carrier" in sa_inspect(detached_dr).expired_attributes
+
+    unmapped_ti.dag_run = detached_dr
+
+    expand_mapped_task(
+        dag.task_dict[mapped.task_id],
+        dr.run_id,
+        "op1",
+        length=3,
+        session=session,
+    )
+
 def test_dag_versions_does_not_short_circuit_on_bundle_version():
     """Verify DagRun.dag_versions evaluates TI versions even when bundle_version is set (#71454)."""
     dag_run = DagRun()

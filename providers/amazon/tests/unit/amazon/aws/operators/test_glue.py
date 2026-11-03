@@ -21,8 +21,10 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import boto3
+import pendulum
 import pytest
 from boto3 import client
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from airflow.providers.amazon.aws.hooks.glue import GlueDataQualityHook, GlueJobHook
@@ -450,7 +452,9 @@ class TestGlueJobOperator:
 
         # Mock the context and task instance
         mock_ti = mock.MagicMock()
-        mock_context = {"ti": mock_ti}
+        mock_dag_run = mock.MagicMock()
+        mock_dag_run.start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+        mock_context = {"ti": mock_ti, "dag_run": mock_dag_run}
 
         # Simulate previous job_run_id in XCom
         previous_job_run_id = "previous_run_12345"
@@ -555,7 +559,10 @@ class TestGlueJobOperator:
         mock_ti.run_id = "manual__2024-01-01T00:00:00+00:00"
         mock_ti.map_index = -1
         mock_ti.xcom_pull.return_value = None
-        mock_context = {"ti": mock_ti}
+        mock_dag_run = mock.MagicMock()
+        mock_dag_run.start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+        mock_context = {"ti": mock_ti, "dag_run": mock_dag_run}
+
 
         task_uuid = f"{mock_ti.dag_id}:{mock_ti.task_id}:{mock_ti.run_id}:{mock_ti.map_index}"
 
@@ -586,6 +593,179 @@ class TestGlueJobOperator:
         assert len(xcom_calls) == 1, "Should push existing glue_job_run_id when found by task UUID"
         assert xcom_calls[0][1]["value"] == "existing_run_123"
 
+    @mock.patch.object(GlueJobHook, "initialize_job")
+    def test_resume_glue_job_on_retry_handles_client_error(self, mock_initialize_job, caplog):
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        mock_ti = mock.MagicMock()
+        mock_ti.dag_id = DAG_ID
+        mock_ti.task_id = TASK_ID
+        mock_ti.run_id = "manual__2024-01-01T00:00:00+00:00"
+        mock_ti.map_index = -1
+        mock_ti.xcom_pull.return_value = None
+
+        context = {
+            "ti": mock_ti,
+            "dag_run": mock.MagicMock(
+                start_date=pendulum.datetime(2024, 1, 1, tz="UTC")
+            ),
+        }
+
+        error = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
+            "GetJobRuns",
+        )
+
+        mock_glue_client = mock.MagicMock()
+        mock_glue_client.get_job_runs.side_effect = error
+        glue.hook.conn = mock_glue_client
+
+        mock_initialize_job.return_value = {"JobRunId": "new_run_123"}
+
+        glue.execute(context)
+
+        assert any(
+            record.levelname == "ERROR"
+            and "AccessDeniedException" in record.message
+            and "Access denied" in record.message
+            for record in caplog.records
+        )
+        mock_initialize_job.assert_called_once()
+
+    def test_resume_glue_job_on_retry_propagates_unexpected_exception(self):
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        mock_ti = mock.MagicMock()
+        mock_ti.dag_id = DAG_ID
+        mock_ti.task_id = TASK_ID
+        mock_ti.run_id = "manual__2024-01-01T00:00:00+00:00"
+        mock_ti.map_index = -1
+        mock_ti.xcom_pull.return_value = None
+
+        context = {
+            "ti": mock_ti,
+            "dag_run": mock.MagicMock(
+                start_date=pendulum.datetime(2024, 1, 1, tz="UTC")
+            ),
+        }
+
+        glue._prepare_script_args_with_task_uuid = mock.Mock(
+            return_value=({}, "task-uuid")
+        )
+        glue._find_job_run_id_by_task_uuid = mock.Mock(
+            side_effect=RuntimeError("unexpected failure")
+        )
+
+        with pytest.raises(RuntimeError, match="unexpected failure"):
+            glue.execute(context)
+
+    def test_find_job_run_by_task_uuid_scans_all_pages(self):
+        """Test that the task UUID search continues through paginated results."""
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        task_uuid = "test_dag_id:test_task:manual__2024-01-01T00:00:00+00:00:-1"
+        mock_dag_run = mock.MagicMock()
+        mock_dag_run.start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+        mock_context = {"dag_run": mock_dag_run}
+        mock_glue_client = mock.MagicMock()
+        glue.hook.conn = mock_glue_client
+
+        mock_glue_client.get_job_runs.return_value = {
+            "JobRuns": [],
+            "NextToken": "next-page",
+        }
+
+        result = glue._find_job_run_id_by_task_uuid(task_uuid, mock_context)
+
+        assert result is None
+        assert mock_glue_client.get_job_runs.call_count == GlueJobOperator.TASK_UUID_SCAN_MAX_PAGES
+
+    def test_find_job_run_by_task_uuid_stops_at_old_job_run(self):
+        """Test that the task UUID search stops when an old job run is reached."""
+        glue = GlueJobOperator(
+            task_id=TASK_ID,
+            job_name=JOB_NAME,
+            script_location="s3://folder/file",
+            aws_conn_id="aws_default",
+            region_name="us-west-2",
+            s3_bucket="some_bucket",
+            iam_role_name="my_test_role",
+            resume_glue_job_on_retry=True,
+            wait_for_completion=False,
+        )
+
+        task_uuid = "test_dag_id:test_task:manual__2024-01-01T00:00:00+00:00:-1"
+        mock_dag_run = mock.MagicMock()
+        mock_dag_run.start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+        mock_context = {"dag_run": mock_dag_run}
+
+        mock_glue_client = mock.MagicMock()
+        glue.hook.conn = mock_glue_client
+
+        mock_glue_client.get_job_runs.side_effect = [
+            {
+                "JobRuns": [
+                    {
+                        "Id": "recent_run",
+                        "StartedOn": pendulum.datetime(2024, 1, 2, tz="UTC"),
+                        "Arguments": {},
+                        "JobRunState": "RUNNING",
+                    },
+                    {
+                        "Id": "old_run",
+                        "StartedOn": pendulum.datetime(2023, 12, 31, tz="UTC"),
+                        "Arguments": {},
+                        "JobRunState": "SUCCEEDED",
+                    },
+                ],
+                "NextToken": "next-page",
+            },
+            {
+                "JobRuns": [
+                    {
+                        "Id": "matching_run",
+                        "StartedOn": pendulum.datetime(2024, 1, 2, tz="UTC"),
+                        "Arguments": {glue.TASK_UUID_ARG: task_uuid},
+                        "JobRunState": "RUNNING",
+                    }
+                ],
+            },
+        ]
+
+        result = glue._find_job_run_id_by_task_uuid(task_uuid, mock_context)
+
+        assert result is None
+        assert mock_glue_client.get_job_runs.call_count == 1
 
 class TestGlueJobOperatorOpenLineageInjection:
     """Tests for OpenLineage parent job info and transport info injection in GlueJobOperator."""
@@ -766,7 +946,9 @@ class TestGlueJobOperatorOpenLineageInjection:
 
         mock_ti = mock.MagicMock()
         mock_ti.xcom_pull.return_value = None  # no previous run
-        context = {"ti": mock_ti}
+        mock_dag_run = mock.MagicMock()
+        mock_dag_run.start_date = pendulum.datetime(2024, 1, 1, tz="UTC")
+        context = {"ti": mock_ti, "dag_run": mock_dag_run}
         glue.execute(context)
 
         mock_inject_parent.assert_called_once()

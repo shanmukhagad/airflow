@@ -1546,7 +1546,9 @@ def _run_task_and_map_outcome(
         if pid != parent_pid:
             return
 
-        ti.task.on_kill()
+        if ti.task:
+            ti.task.on_kill()
+        raise AirflowTaskTerminated("Task process received SIGTERM")
 
     signal.signal(signal.SIGTERM, _on_term)
 
@@ -2354,6 +2356,12 @@ def finalize(
         _run_task_state_change_callbacks(task, "on_retry_callback", context, log)
         try:
             get_listener_manager().hook.on_task_instance_failed(
+                previous_state=TaskInstanceState.RUNNING, task_instance=ti, error=error
+            )
+        except Exception:
+            log.exception("error calling listener")
+        try:
+            get_listener_manager().hook.on_task_instance_up_for_retry(
                 previous_state=TaskInstanceState.RUNNING, task_instance=ti, error=error
             )
         except Exception:

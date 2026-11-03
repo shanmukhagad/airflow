@@ -36,7 +36,7 @@ from urllib.parse import urlencode
 import attrs
 from google.cloud import logging as gcp_logging
 from google.cloud.logging import Resource
-from google.cloud.logging.handlers.transports import BackgroundThreadTransport, Transport
+from google.cloud.logging.handlers.transports import BackgroundThreadTransport, Transport, SyncTransport
 from google.cloud.logging_v2.services.logging_service_v2 import LoggingServiceV2Client
 from google.cloud.logging_v2.types import ListLogEntriesRequest, ListLogEntriesResponse
 
@@ -339,7 +339,7 @@ class StackdriverTaskHandler(logging.Handler):
         gcp_key_path: str | None = None,
         scopes: Collection[str] | None = _DEFAULT_SCOPESS,
         name: str | ArgNotSet = NOTSET,
-        transport: type[Transport] = BackgroundThreadTransport,
+        transport: type[Transport] = SyncTransport,
         resource: Resource = _GLOBAL_RESOURCE,
         labels: dict[str, str] | None = None,
         gcp_log_name: str = DEFAULT_LOGGER_NAME,
@@ -392,12 +392,34 @@ class StackdriverTaskHandler(logging.Handler):
 
         :param record: The record to be logged.
         """
-        message = self.format(record)
-        ti = None
-        if not AIRFLOW_V_3_0_PLUS and getattr(record, ctx_indiv_trigger.name, None):
-            ti = getattr(record, "task_instance", None)  # trigger context
-        labels = self._get_labels(ti)
-        self.io.transport.send(record, message, resource=self.resource, labels=labels)
+
+        try:
+            message = self.format(record)
+            ti = None
+            if not AIRFLOW_V_3_0_PLUS and getattr(record, ctx_indiv_trigger.name, None):
+                ti = getattr(record, "task_instance", None)  # trigger context
+            labels = self._get_labels(ti)
+            
+            # Send log line via transport
+            self.io.transport.send(record, message, resource=self.resource, labels=labels)
+            
+            # Synchronously flush transport if method is supported
+            self._flush_transport()
+        
+        except Exception:
+            self.handleError(record)
+        
+
+    def _flush_transport(self) -> None:
+        """Helper to safely flush underlying transport without raising unhandled exceptions."""
+        try:
+            transport = getattr(self.io, "transport", None)
+            flush_fn = getattr(transport, "flush", None)
+            if callable(flush_fn):
+                flush_fn()
+        except Exception as exc:
+            # Degrade gracefully so logging issues never fail running task execution
+            _logger.debug("StackdriverTaskHandler failed to flush transport: %s", exc)
 
     def set_context(self, task_instance: TaskInstance) -> None:
         """

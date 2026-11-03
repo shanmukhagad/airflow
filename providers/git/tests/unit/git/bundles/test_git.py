@@ -467,6 +467,51 @@ class TestGitDagBundle:
         assert _version_str(bundle2.get_current_version()) == hexsha
 
     @mock.patch("airflow.providers.git.bundles.git.GitHook")
+    def test_checkout_failure_cleans_up_and_retries(self, mock_githook, git_repo):
+        """A failed checkout removes the stale clone so the next attempt can succeed."""
+        repo_path, repo = git_repo
+        mock_githook.return_value.repo_url = repo_path
+        bundle_name = "test_checkout_retry"
+
+        bundle1 = GitDagBundle(
+            name=bundle_name,
+            git_conn_id=CONN_HTTPS,
+            tracking_ref=GIT_DEFAULT_BRANCH,
+            prune_dotgit_folder=False,
+        )
+        bundle1.initialize()
+
+        # Simulate an untracked file left behind by an interrupted task.
+        leftover = bundle1.repo_path / "new_dag.py"
+        leftover.write_text("leftover content")
+
+        # Add an upstream commit containing the same path.
+        upstream_file = repo_path / "new_dag.py"
+        upstream_file.write_text("from upstream")
+        repo.index.add([upstream_file])
+        new_commit = repo.index.commit("Add new DAG")
+
+        # Make the new commit available in the bare repository, while the
+        # existing working clone remains stale.
+        bare_repo = Repo(bundle1.bare_repo_path)
+        try:
+            bare_repo.git.fetch("origin", GIT_DEFAULT_BRANCH)
+            bare_repo.git.update_ref(f"refs/heads/{GIT_DEFAULT_BRANCH}", new_commit.hexsha)
+        finally:
+            bare_repo.close()
+
+        bundle2 = GitDagBundle(
+            name=bundle_name,
+            git_conn_id=CONN_HTTPS,
+            tracking_ref=new_commit.hexsha,
+            prune_dotgit_folder=False,
+        )
+        bundle2.initialize()
+
+        assert (bundle2.repo_path / "new_dag.py").read_text() == "from upstream"
+        assert bundle2.repo.head.commit.hexsha == new_commit.hexsha
+
+    @mock.patch("airflow.providers.git.bundles.git.GitHook")
     def test_skip_path_cleans_dirty_working_tree(self, mock_githook, git_repo):
         """The fast-path discards working-tree mutations left by previous task runs."""
         repo_path, repo = git_repo
@@ -699,6 +744,88 @@ class TestGitDagBundle:
         assert _version_str(bundle.get_current_version()) == commit_a.hexsha
         files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
         assert {"test_dag.py"} == files_in_repo
+
+    @mock.patch("airflow.providers.git.bundles.git.GitHook")
+    def test_tracking_ref_commit_sha_rollback(self, mock_githook, git_repo):
+        """Ensure tracking_ref accepts a full commit SHA, and rolling back to an
+        already-local SHA succeeds after a config-driven bundle re-creation.
+        """
+        repo_path, repo = git_repo
+        mock_githook.return_value.repo_url = repo_path
+        first_commit = repo.head.commit
+
+        file_path = repo_path / "new_test.py"
+        with open(file_path, "w") as f:
+            f.write("hello world")
+        repo.index.add([file_path])
+        second_commit = repo.index.commit("Another commit")
+
+        # Initial deploy pinned to the second commit's SHA; both commits are already
+        # fetched into local storage since the origin repo had them at clone time.
+        bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=second_commit.hexsha)
+        bundle.initialize()
+        assert _version_str(bundle.get_current_version()) == second_commit.hexsha
+        files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
+        assert {"test_dag.py", "new_test.py"} == files_in_repo
+        assert_repo_is_closed(bundle)
+
+        # Rollback: config change re-creates the bundle pointed back at the first commit's
+        # SHA. That commit's objects are already in local storage, so it succeeds.
+        bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=first_commit.hexsha)
+        bundle.initialize()
+        assert _version_str(bundle.get_current_version()) == first_commit.hexsha
+        files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
+        assert {"test_dag.py"} == files_in_repo
+
+    @mock.patch("airflow.providers.git.bundles.git.GitHook")
+    def test_tracking_ref_commit_sha_promote_succeeds_after_retry(self, mock_githook, git_repo):
+        """A checkout failure cleans up the stale tracking clone and retries successfully."""
+        repo_path, repo = git_repo
+        mock_githook.return_value.repo_url = repo_path
+        first_commit = repo.head.commit
+
+        bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=first_commit.hexsha)
+        bundle.initialize()
+        assert _version_str(bundle.get_current_version()) == first_commit.hexsha
+        assert_repo_is_closed(bundle)
+
+        # Create a new commit after the bundle's local storage already exists.
+        file_path = repo_path / "new_test.py"
+        with open(file_path, "w") as f:
+            f.write("hello world")
+        repo.index.add([file_path])
+        second_commit = repo.index.commit("Another commit")
+
+        # Reinitialization should recover from the stale tracking clone.
+        bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=second_commit.hexsha)
+        bundle.initialize()
+        assert _version_str(bundle.get_current_version()) == second_commit.hexsha
+
+    @mock.patch("airflow.providers.git.bundles.git.GitHook")
+    def test_tracking_ref_commit_sha_promote_succeeds_with_fresh_storage(self, mock_githook, git_repo):
+        """Promoting a SHA-pinned tracking_ref to a new commit succeeds once local storage
+        is cleared (e.g. a fresh pod), since that re-clones from the updated bare mirror.
+        """
+        repo_path, repo = git_repo
+        mock_githook.return_value.repo_url = repo_path
+        first_commit = repo.head.commit
+
+        bundle = GitDagBundle(name="test", git_conn_id=CONN_HTTPS, tracking_ref=first_commit.hexsha)
+        bundle.initialize()
+        assert_repo_is_closed(bundle)
+
+        file_path = repo_path / "new_test.py"
+        with open(file_path, "w") as f:
+            f.write("hello world")
+        repo.index.add([file_path])
+        second_commit = repo.index.commit("Another commit")
+
+        # Different bundle name -> fresh local storage, simulating a freshly started pod.
+        bundle = GitDagBundle(name="test-fresh", git_conn_id=CONN_HTTPS, tracking_ref=second_commit.hexsha)
+        bundle.initialize()
+        assert _version_str(bundle.get_current_version()) == second_commit.hexsha
+        files_in_repo = {f.name for f in bundle.path.iterdir() if f.is_file()}
+        assert {"test_dag.py", "new_test.py"} == files_in_repo
 
     @mock.patch("airflow.providers.git.bundles.git.GitHook")
     def test_refresh_after_force_push_does_not_reclone(self, mock_githook, git_repo):

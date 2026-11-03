@@ -21,7 +21,7 @@ import contextlib
 import datetime
 import time
 import traceback
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from enum import Enum
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast
@@ -100,6 +100,8 @@ class KubernetesPodTrigger(BaseTrigger):
         the operator to print latest logs. If ``None`` will wait until container done.
     :param last_log_time: where to resume logs from
     :param trigger_kwargs: additional keyword parameters to send in the event
+    :param init_container_logs: Determines whether to stream init container logs.
+        Can be a boolean or an iterable of container names to stream.
     """
 
     def __init__(
@@ -124,6 +126,7 @@ class KubernetesPodTrigger(BaseTrigger):
         last_log_time: DateTime | None = None,
         logging_interval: int | None = None,
         trigger_kwargs: dict | None = None,
+        init_container_logs: bool | Iterable[str] | str | None = False,
     ):
         super().__init__()
         self.pod_name = pod_name
@@ -146,6 +149,8 @@ class KubernetesPodTrigger(BaseTrigger):
         self.on_kill_action = OnKillAction(on_kill_action)
         self.termination_grace_period = termination_grace_period
         self.trigger_kwargs = trigger_kwargs or {}
+        self.init_container_logs = init_container_logs
+        self.last_init_log_time: dict[str, Any] = {}
         self._fired_event = False
         self._since_time = None
 
@@ -174,6 +179,7 @@ class KubernetesPodTrigger(BaseTrigger):
                 "last_log_time": self.last_log_time,
                 "logging_interval": self.logging_interval,
                 "trigger_kwargs": self.trigger_kwargs,
+                "init_container_logs": self.init_container_logs,
             },
         )
 
@@ -205,6 +211,12 @@ class KubernetesPodTrigger(BaseTrigger):
             )
             return
         try:
+            if self.init_container_logs:
+                init_event = await self._wait_for_init_containers_completion()
+                if init_event is not None:
+                    self._fired_event = True
+                    yield init_event
+                    return
             state = await self._wait_for_pod_start_within_deadline()
             if state == ContainerState.TERMINATED:
                 event = TriggerEvent(
@@ -291,6 +303,138 @@ class KubernetesPodTrigger(BaseTrigger):
         curr_traceback = traceback.format_exc()
         description += f"\ntrigger traceback:\n{curr_traceback}"
         return description
+
+    def _get_target_init_containers(self, pod: V1Pod) -> list[str]:
+        """Extract list of init containers that need log streaming."""
+        if not self.init_container_logs:
+            return []
+        all_inits: list[str] = []
+        if getattr(pod, "spec", None) and pod.spec.init_containers:
+            all_inits = [c.name for c in pod.spec.init_containers]
+        elif getattr(pod, "status", None) and pod.status.init_container_statuses:
+            all_inits = [s.name for s in pod.status.init_container_statuses]
+
+        if self.init_container_logs is True:
+            return all_inits
+        if isinstance(self.init_container_logs, str):
+            targets = [self.init_container_logs]
+        else:
+            targets = list(self.init_container_logs)
+        return [c for c in targets if c in all_inits]
+
+    async def _wait_for_init_containers_completion(self) -> TriggerEvent | None:
+        """
+        Wait for init containers to complete and stream their logs.
+
+        Returns a failure TriggerEvent if an init container fails (Fast-Fail),
+        a timeout TriggerEvent if the execution deadline is exceeded,
+        or None when all init containers complete successfully.
+        """
+        if not hasattr(self, "last_init_log_time") or self.last_init_log_time is None:
+            self.last_init_log_time = {}
+
+        execution_deadline = self.trigger_kwargs.get("_execution_deadline")
+        start_time = time.time()
+
+        while True:
+            if execution_deadline is not None and time.time() >= execution_deadline:
+                return TriggerEvent(
+                    {
+                        "status": "timeout",
+                        "namespace": self.pod_namespace,
+                        "name": self.pod_name,
+                        "message": (
+                            f"Pod {self.pod_namespace}/{self.pod_name} reached the task's "
+                            "execution_timeout deadline while waiting for init containers."
+                        ),
+                        **self.trigger_kwargs,
+                    }
+                )
+
+            if time.time() - start_time > self.startup_timeout:
+                raise PodLaunchTimeoutException(
+                    f"Pod {self.pod_namespace}/{self.pod_name} timed out waiting for init containers."
+                )
+
+            pod = await self._get_pod()
+            target_containers = self._get_target_init_containers(pod)
+
+            # Stream logs for running or terminated init containers
+            if self.get_logs and target_containers:
+                for c_name in target_containers:
+                    status = (
+                        next(
+                            (s for s in (pod.status.init_container_statuses or []) if s.name == c_name),
+                            None,
+                        )
+                        if getattr(pod, "status", None)
+                        else None
+                    )
+                    if status and status.state and (status.state.running or status.state.terminated):
+                        try:
+                            self.last_init_log_time[
+                                c_name
+                            ] = await self.pod_manager.fetch_container_logs_before_current_sec(
+                                pod,
+                                container_name=c_name,
+                                since_time=self.last_init_log_time.get(c_name),
+                            )
+                        except Exception as exc:
+                            self.log.warning("Could not fetch logs for init container %s: %s", c_name, exc)
+
+            # Fast-Fail: Check if any init container terminated with non-zero exit code
+            if getattr(pod, "status", None) and pod.status.init_container_statuses:
+                for s in pod.status.init_container_statuses:
+                    if s.state and s.state.terminated and s.state.terminated.exit_code != 0:
+                        if self.get_logs and s.name in target_containers:
+                            with contextlib.suppress(Exception):
+                                self.last_init_log_time[
+                                    s.name
+                                ] = await self.pod_manager.fetch_container_logs_before_current_sec(
+                                    pod,
+                                    container_name=s.name,
+                                    since_time=self.last_init_log_time.get(s.name),
+                                )
+                        return TriggerEvent(
+                            {
+                                "status": "failed",
+                                "namespace": self.pod_namespace,
+                                "name": self.pod_name,
+                                "message": f"Init container {s.name} failed with exit code {s.state.terminated.exit_code}",
+                                **self.trigger_kwargs,
+                            }
+                        )
+
+            # Check if all init containers are finished
+            all_done = False
+            if getattr(pod, "spec", None) and pod.spec.init_containers:
+                expected_names = [c.name for c in pod.spec.init_containers]
+                statuses = (
+                    {s.name: s for s in (pod.status.init_container_statuses or [])}
+                    if getattr(pod, "status", None)
+                    else {}
+                )
+                if expected_names and all(
+                    name in statuses
+                    and statuses[name].state
+                    and statuses[name].state.terminated
+                    and statuses[name].state.terminated.exit_code == 0
+                    for name in expected_names
+                ):
+                    all_done = True
+            elif getattr(pod, "status", None) and pod.status.init_container_statuses:
+                if all(
+                    s.state and s.state.terminated and s.state.terminated.exit_code == 0
+                    for s in pod.status.init_container_statuses
+                ):
+                    all_done = True
+            elif not getattr(pod, "spec", None) or not pod.spec.init_containers:
+                all_done = True
+
+            if all_done:
+                return None
+
+            await asyncio.sleep(self.poll_interval)
 
     async def _wait_for_pod_start_within_deadline(self) -> ContainerState:
         """

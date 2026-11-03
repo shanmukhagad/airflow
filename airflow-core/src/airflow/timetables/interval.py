@@ -26,6 +26,7 @@ from airflow._shared.timezones.timezone import coerce_datetime, parse_timezone, 
 from airflow.timetables._cron import CronMixin
 from airflow.timetables._delta import DeltaMixin
 from airflow.timetables.base import DagRunInfo, DataInterval, Timetable
+from airflow.utils.types import DagRunType
 
 if TYPE_CHECKING:
     from airflow.timetables.base import TimeRestriction
@@ -154,6 +155,24 @@ class CronDataIntervalTimetable(CronMixin, _DataIntervalTimetable):
 
         return {"expression": self._expression, "timezone": encode_timezone(self._timezone)}
 
+    def generate_run_id(
+        self,
+        *,
+        run_type: DagRunType,
+        run_after: DateTime,
+        data_interval: DataInterval | None,
+        **extra: Any,
+    ) -> str:
+        if run_type == DagRunType.SCHEDULED and data_interval is not None:
+            return run_type.generate_run_id(suffix=data_interval.start.isoformat())
+
+        return super().generate_run_id(
+            run_type=run_type,
+            run_after=run_after,
+            data_interval=data_interval,
+            **extra,
+        )
+
     def _skip_to_latest(self, earliest: DateTime | None) -> DateTime:
         """
         Bound the earliest time a run can be scheduled.
@@ -176,8 +195,16 @@ class CronDataIntervalTimetable(CronMixin, _DataIntervalTimetable):
             raise AssertionError("next schedule shouldn't be earlier")
         if earliest is None:
             return new_start
-        return max(new_start, self._align_to_next(earliest))
 
+        aligned = self._align_to_next(earliest)
+        if aligned > earliest:
+            interval_start = self._get_prev(aligned)
+            # Only use the active interval if its end time (aligned) is in the future
+            if aligned > current_time:
+                aligned = interval_start
+
+        return max(new_start, aligned)
+    
     def infer_manual_data_interval(self, *, run_after: DateTime) -> DataInterval:
         # Get the last complete period before run_after, e.g. if a DAG run is
         # scheduled at each midnight, the data interval of a manually triggered

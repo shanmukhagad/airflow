@@ -28,6 +28,14 @@ from airflow.models import DagRun
 from airflow.providers.standard.utils.sensor_helper import _get_count
 from airflow.providers.standard.version_compat import AIRFLOW_V_3_0_PLUS
 from airflow.triggers.base import BaseTrigger, TriggerEvent
+from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
+from airflow.providers.standard.exceptions import (
+    ExternalTaskNotFoundError,
+    ExternalDagNotFoundError, 
+    ExternalTaskGroupNotFoundError,
+)
+
+from airflow.models.dag_version import DagVersion
 
 if typing.TYPE_CHECKING:
     from datetime import datetime
@@ -66,6 +74,7 @@ class WorkflowTrigger(BaseTrigger):
         allowed_states: Collection[str] | None = None,
         poke_interval: float = 2.0,
         soft_fail: bool = False,
+        check_existence: bool = False,
         **kwargs,
     ):
         self.external_dag_id = external_dag_id
@@ -77,6 +86,7 @@ class WorkflowTrigger(BaseTrigger):
         self.run_ids = run_ids
         self.poke_interval = poke_interval
         self.soft_fail = soft_fail
+        self.check_existence = check_existence
         self.execution_dates = execution_dates
         self.logical_dates = logical_dates
         super().__init__(**kwargs)
@@ -109,6 +119,20 @@ class WorkflowTrigger(BaseTrigger):
         else:
             get_count_func = self._get_count
             run_id_or_dates = self.execution_dates or []
+
+        if AIRFLOW_V_3_0_PLUS and self.check_existence:
+            dag_version = await sync_to_async(DagVersion.get_latest_version)(self.external_dag_id)
+            if not dag_version or not dag_version.serialized_dag:
+                raise ExternalDagNotFoundError(f"The external DAG {self.external_dag_id} does not exist")
+            serialized_dag = dag_version.serialized_dag.dag
+            if self.external_task_ids:
+                for task_id in self.external_task_ids:
+                    if not serialized_dag.has_task(task_id):
+                        raise ExternalTaskNotFoundError(f"The external task {task_id} in DAG {self.external_dag_id} does not exist")
+            if self.external_task_group_id:
+                if self.external_task_group_id not in serialized_dag.task_group_dict:
+                    raise ExternalTaskGroupNotFoundError (f"The external task group '{self.external_task_group_id}' in"
+                    f"DAG '{self.external_dag_id}' doesnot exist")       
 
         while True:
             if self.failed_states:

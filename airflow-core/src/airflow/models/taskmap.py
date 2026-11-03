@@ -200,7 +200,7 @@ class TaskMap(TaskInstanceDependencies):
                 )
                 unmapped_ti.state = TaskInstanceState.SKIPPED
             else:
-                dr = unmapped_ti.dag_run
+                dr = session.merge(unmapped_ti.dag_run)
                 zero_index_ti_exists = exists_query(
                     TaskInstance.dag_id == task.dag_id,
                     TaskInstance.task_id == task.task_id,

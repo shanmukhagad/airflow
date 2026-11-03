@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 from unittest.mock import PropertyMock
 
@@ -59,7 +59,7 @@ class TestAwsTaskLogFetcher:
                 ]
             ),
             iter([]),
-            iter([]),    # added 
+            iter([]),  # added
         ),
     )
     def test_run(self, get_log_events_mock):
@@ -101,6 +101,63 @@ class TestAwsTaskLogFetcher:
         assert token.value == "my_next_token"
         # 2 calls expected, it's only on the second one that the stop condition old_token == next_token is met
         assert logs_conn_mock().get_log_events.call_count == 2
+
+    def test_continuation_token_is_retained_across_poll_iterations(self):
+        token = AwsLogsHook.ContinuationToken()
+        token.value = "token-start"
+
+        def fake_get_log_events(continuation_token):
+            if continuation_token.value == "token-start":
+                continuation_token.value = "token-next"
+                yield {"timestamp": 1617400267123, "message": "First"}
+            else:
+                continuation_token.value = "token-final"
+                yield {"timestamp": 1617400367456, "message": "Second"}
+
+        with mock.patch.object(self.log_fetcher, "_get_log_events", side_effect=fake_get_log_events):
+            self.log_fetcher._forward_log_events(token)
+            assert token.value == "token-next"
+
+            self.log_fetcher._forward_log_events(token)
+            assert token.value == "token-final"
+
+    def test_prev_timestamp_event_persists_across_poll_iterations(self):
+        self.log_fetcher._prev_timestamp_event = datetime.fromtimestamp(
+            1710000000, tz=timezone.utc
+        )
+
+        first_batch = [{"timestamp": 1710000000000, "message": "First"}]
+        second_batch = [{"timestamp": 1710000000000, "message": "Second"}]
+
+        with mock.patch.object(
+            self.log_fetcher,
+            "_get_log_events",
+            side_effect=(iter(first_batch), iter(second_batch)),
+        ):
+            self.log_fetcher._forward_log_events(AwsLogsHook.ContinuationToken())
+            self.log_fetcher._forward_log_events(AwsLogsHook.ContinuationToken())
+
+        assert self.log_fetcher._prev_timestamp_event == datetime.fromtimestamp(
+            1710000000, tz=timezone.utc
+        )
+
+    def test_get_log_events_returns_raw_event_dicts_and_get_last_log_messages_returns_strings(self):
+        mock_events = [
+            {"timestamp": 1617400267123, "message": "First"},
+            {"timestamp": 1617400367456, "message": "Second"},
+        ]
+
+        with mock.patch.object(self.log_fetcher, "_get_log_events", return_value=iter(mock_events)):
+            fetched_events = list(self.log_fetcher._get_log_events())
+            assert all(isinstance(event, dict) for event in fetched_events)
+            assert fetched_events[0]["timestamp"] == 1617400267123
+            assert fetched_events[0]["message"] == "First"
+
+        with mock.patch.object(AwsLogsHook, "conn") as log_conn_mock:
+            log_conn_mock.get_log_events.return_value = {"events": mock_events}
+            messages = self.log_fetcher.get_last_log_messages(2)
+            assert messages == ["First", "Second"]
+            assert all(isinstance(message, str) for message in messages)
 
     def test_event_to_str(self):
         events = [
@@ -163,7 +220,7 @@ class TestAwsTaskLogFetcher:
                     },
                 ]
             ),
-            iter([]), # added 
+            iter([]),  # added
         ),
     )
     def test_run_with_log_level_detection(self, get_log_events_mock):
@@ -180,6 +237,37 @@ class TestAwsTaskLogFetcher:
                 mock.call(logging.INFO, "[2021-04-02 21:54:27,789] Just a plain message"),
             ]
         )
+
+    @mock.patch(
+        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
+        side_effect=(iter([{"timestamp": 1617400267123, "message": "First"}]), iter([])),
+    )
+    def test_run_calls_on_log_event_callback(self, get_log_events_mock):
+        callback = mock.Mock()
+        self.log_fetcher.on_log_event = callback
+
+        with mock.patch.object(self.log_fetcher._event, "wait", side_effect=(False, True)):
+            self.log_fetcher.run()
+
+        callback.assert_called_once_with({"timestamp": 1617400267123, "message": "First"})
+        self.logger_mock.log.assert_called_once_with(
+            logging.INFO, "[2021-04-02 21:51:07,123] First"
+        )
+
+    @mock.patch(
+        "airflow.providers.amazon.aws.hooks.logs.AwsLogsHook.get_log_events",
+        side_effect=(iter([{"timestamp": 1617400267123, "message": "First"}]), iter([])),
+    )
+    def test_run_ignores_callback_errors(self, get_log_events_mock):
+        callback = mock.Mock(side_effect=RuntimeError("boom"))
+        self.log_fetcher.on_log_event = callback
+
+        with mock.patch.object(self.log_fetcher._event, "wait", side_effect=(False, True)):
+            self.log_fetcher.run()
+
+        callback.assert_called_once_with({"timestamp": 1617400267123, "message": "First"})
+        self.logger_mock.warning.assert_called_once()
+        assert "Error while calling on_log_event callback" in self.logger_mock.warning.call_args[0][0]
 
 
 class TestParseLogLevel:

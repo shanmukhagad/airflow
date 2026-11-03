@@ -266,6 +266,39 @@ class TestClient:
             assert response.status_code == 200
             assert len(responses) == 1
 
+    def test_clients_use_independent_retry_settings(self):
+        responses_a = [httpx.Response(500, text="Internal Server Error") for _ in range(3)]
+        responses_b = [httpx.Response(500, text="Internal Server Error") for _ in range(4)]
+
+        client_a = Client(
+            base_url=None,
+            dry_run=True,
+            token="",
+            api_retries=2,
+            api_retry_wait_min=0,
+            api_retry_wait_max=0,
+            mounts={"'http://": httpx.MockTransport(lambda request: responses_a.pop(0))},
+        )
+
+        client_b = Client(
+            base_url=None,
+            dry_run=True,
+            token="",
+            api_retries=3,
+            api_retry_wait_min=0,
+            api_retry_wait_max=0,
+            mounts={"'http://": httpx.MockTransport(lambda request: responses_b.pop(0))},
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client_a.get("http://error")
+
+        with pytest.raises(httpx.HTTPStatusError):
+            client_b.get("http://error")
+
+        assert len(responses_a) == 1
+        assert len(responses_b) == 1
+
     def test_token_renewal(self):
         responses: list[httpx.Response] = [
             httpx.Response(200, json={"ok": "1"}),

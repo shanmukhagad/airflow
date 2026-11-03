@@ -104,6 +104,18 @@ class TestStats:
         self.stats.gauge("empty", 123)
         self.statsd_client.gauge.assert_called_once_with("empty", 123, 1, False)
 
+    def test_observable_gauge(self):
+        self.stats.observable_gauge("empty", lambda: 123)
+        self.statsd_client.gauge.assert_called_once_with("empty", 123, 1, False)
+
+    def test_observable_gauge_callback_error_is_logged(self, caplog):
+        def broken():
+            raise ValueError("boom")
+
+        self.stats.observable_gauge("empty", broken)
+        self.statsd_client.gauge.assert_not_called()
+        assert "empty" in caplog.text
+
     def test_decr(self):
         self.stats.decr("empty")
         self.statsd_client.decr.assert_called_once_with("empty", 1, 1)
@@ -252,6 +264,18 @@ class TestDogStats:
     def test_gauge(self):
         self.dogstatsd.gauge("empty", 123)
         self.dogstatsd_client.gauge.assert_called_once_with(metric="empty", sample_rate=1, value=123, tags=[])
+
+    def test_observable_gauge(self):
+        self.dogstatsd.observable_gauge("empty", lambda: 123)
+        self.dogstatsd_client.gauge.assert_called_once_with(metric="empty", sample_rate=1, value=123, tags=[])
+
+    def test_observable_gauge_callback_error_is_logged(self, caplog):
+        def broken():
+            raise ValueError("boom")
+
+        self.dogstatsd.observable_gauge("empty", broken)
+        self.dogstatsd_client.gauge.assert_not_called()
+        assert "empty" in caplog.text
 
     def test_decr(self):
         self.dogstatsd.decr("empty")
@@ -680,6 +704,23 @@ class TestLegacyExport:
         mock_backend.gauge.assert_any_call(
             "ti.scheduled",
             42,
+            tags={"queue": "default", "dag_id": "test_dag", "task_id": "test_task"},
+        )
+
+    def test_observable_gauge_emits_both_when_legacy_name_exists(self, mock_backend):
+        def callback():
+            return 42
+
+        airflow_shared.observability.metrics.stats.observable_gauge(
+            "ti.scheduled",
+            callback,
+            tags={"queue": "default", "dag_id": "test_dag", "task_id": "test_task"},
+        )
+        assert mock_backend.observable_gauge.call_count == 2
+        mock_backend.observable_gauge.assert_any_call("ti.scheduled.default.test_dag.test_task", callback)
+        mock_backend.observable_gauge.assert_any_call(
+            "ti.scheduled",
+            callback,
             tags={"queue": "default", "dag_id": "test_dag", "task_id": "test_task"},
         )
 

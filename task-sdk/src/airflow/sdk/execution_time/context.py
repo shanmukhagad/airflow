@@ -27,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 from functools import cache
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, overload
 from uuid import UUID
+from airflow.sdk.execution_time.comms import SetAssetStateStoreByName, SetAssetStateStoreByUri
+from airflow.sdk.execution_time.comms import GetAssetStateStoreByName, GetAssetStateStoreByUri
 
 import attrs
 import structlog
@@ -550,6 +552,34 @@ class TaskStateStoreAccessor:
     # TODO: ``__getattr__`` for jinja template access like ``{{ task_store.job_id }}``
     # is not implemented yet cos it's unclear whether task state values will be
     # used in templates.
+    async def aget(self, key: str, default: JsonValue = None) -> JsonValue:
+        """
+        Return the stored value, or ``default`` if the key does not exist.
+        Supported types: ``str``, ``int``, ``float``, ``bool``, ``list``, ``dict``.
+        ``datetime`` is not JSON-serializable; store it as ``value.isoformat()`` and
+        parse it back with ``datetime.fromisoformat(result)``.
+        """
+        from airflow.sdk.execution_time.comms import ErrorResponse, GetTaskStateStore, TaskStateStoreResult
+        from airflow.sdk.execution_time.task_runner import SUPERVISOR_COMMS
+
+        resp = await SUPERVISOR_COMMS.asend(GetTaskStateStore(ti_id=self._ti_id, key=key))
+        if isinstance(resp, ErrorResponse) and resp.error != ErrorType.TASK_STORE_NOT_FOUND:
+            raise AirflowRuntimeError(resp)
+        if isinstance(resp, TaskStateStoreResult):
+            stored = resp.value
+            backend = _get_worker_state_store_backend()
+            if backend is not None and isinstance(stored, dict) and (ref := _unwrap_external_ref(stored)):
+                # unwrap the marker to get the ref, and retrieve the actual value from the backend using the ref
+                return await backend.adeserialize_task_state_store_from_ref(ref)  # added await before backend
+            if backend is not None:
+                log.warning(
+                    "Task store key %r was not written through the configured state backend — returning raw "
+                    "stored value. To use the backend, ensure the task that wrote this key had the same "
+                    "backend configured.",
+                    key,
+                )
+            return stored
+        return default
 
     def get(self, key: str, default: JsonValue = None) -> JsonValue:
         """
@@ -581,6 +611,57 @@ class TaskStateStoreAccessor:
                 )
             return stored
         return default
+
+    async def aset(self, key: str, value: JsonValue, *, retention: timedelta | None = None) -> None:
+        """
+        Write or overwrite the value for the given key.
+        ``value`` must not be ``None``.
+        ``retention`` is an optional key that controls when this key expires:
+        - ``timedelta(...)`` — expire after the given duration (e.g. ``timedelta(hours=6)``).
+        - ``NEVER_EXPIRE`` — key never expires, regardless of the global config and is skipped by garbage collection.
+        - ``None`` (default) — use the global ``[state_store] default_retention_days`` config.
+        """
+        from airflow.sdk.execution_time.comms import SetTaskStateStore
+        from airflow.sdk.execution_time.task_runner import SUPERVISOR_COMMS
+
+        if value is None:
+            raise ValueError("Cannot set value as None")
+        # expires_at is always resolved on the worker in UTC before being sent.
+        now = datetime.now(tz=timezone.utc)
+        if retention is NEVER_EXPIRE:
+            expires_at = None
+        elif retention is not None:
+            expires_at = now + retention
+        else:
+            days = conf.getint("state_store", "default_retention_days")
+            if days < 0:
+                raise ValueError(
+                    f"[state_store] default_retention_days must be >= 0, got {days}. "
+                    "Set to 0 to disable expiry."
+                )
+            expires_at = None if days == 0 else now + timedelta(days=days)
+        # if custom backend is configured, store the value on the custom backend, and return the reference
+        # to the stored value to store in the DB
+        backend = _get_worker_state_store_backend()
+        stored: JsonValue = value
+        if backend is not None:
+            ref: str = await backend.aserialize_task_state_store_to_ref(
+                value=value, key=key, scope=self._scope
+            )
+            # wrap the value with a marker to indicate that it's stored externally, and include the ref to the external storage
+            stored = _wrap_external_ref(ref)
+        msg = SetTaskStateStore(ti_id=self._ti_id, key=key, value=stored, expires_at=expires_at)
+        if (limit := conf.getint("state_store", "max_value_storage_bytes")) > 0:
+            serialized_size = len(json.dumps(stored))
+            if serialized_size > limit:
+                log.warning(
+                    "Task store value for key %r is %d bytes, which exceeds configured max_value_storage_bytes=%d. "
+                    "Consider configuring [workers] state_store_backend to offload large payloads.",
+                    key,
+                    serialized_size,
+                    limit,
+                )
+        await SUPERVISOR_COMMS.asend(msg)  # added await and asend
 
     def set(self, key: str, value: JsonValue, *, retention: timedelta | None = None) -> None:
         """
@@ -714,10 +795,11 @@ class AssetStateStoreAccessor:
         from airflow.sdk.execution_time.task_runner import SUPERVISOR_COMMS
 
         resp = await SUPERVISOR_COMMS.asend(self._build_get_message(key))
-        return self._extract_get_response(resp, key, default)
+        return await self._aextract_get_response(
+            resp, key, default
+        )  # chnaged this syncronus extrcat_get_response to async
 
     def _build_get_message(self, key: str) -> ToSupervisor:
-        from airflow.sdk.execution_time.comms import GetAssetStateStoreByName, GetAssetStateStoreByUri
 
         msg: ToSupervisor
         if self._name:
@@ -725,6 +807,29 @@ class AssetStateStoreAccessor:
         elif self._uri:
             msg = GetAssetStateStoreByUri(uri=self._uri, key=key)
         return msg
+
+    async def _aextract_get_response(self, resp: Any, key: str, default: JsonValue) -> JsonValue:
+        # Copy the existing _extract_get_response().
+        from airflow.sdk.execution_time.comms import AssetStateStoreResult, ErrorResponse
+
+        if isinstance(resp, ErrorResponse) and resp.error != ErrorType.ASSET_STORE_NOT_FOUND:
+            raise AirflowRuntimeError(resp)
+        if isinstance(resp, AssetStateStoreResult):
+            stored = resp.value
+            backend = _get_worker_state_store_backend()
+            if backend is not None and isinstance(stored, dict) and (ref := _unwrap_external_ref(stored)):
+                # unwrap the marker to get the ref, and retrieve the actual value from the backend using the ref
+                return await backend.adeserialize_asset_state_store_from_ref(ref)
+            if backend is not None:
+                log.warning(
+                    "Asset store key %r for asset %r was not written through the configured state backend — "
+                    "returning raw stored value. To use the backend, ensure the task that wrote this key had "
+                    "the same backend configured.",
+                    key,
+                    self._name or self._uri,
+                )
+            return stored
+        return default
 
     def _extract_get_response(self, resp: Any, key: str, default: JsonValue) -> JsonValue:
         from airflow.sdk.execution_time.comms import AssetStateStoreResult, ErrorResponse
@@ -758,7 +863,8 @@ class AssetStateStoreAccessor:
         """Async version of `set` that awaits instead of blocking the event loop."""
         from airflow.sdk.execution_time.task_runner import SUPERVISOR_COMMS
 
-        await SUPERVISOR_COMMS.asend(self._build_set_message(key, value))
+        mssg = await self._abuild_set_message(key, value)  # only chnage i done is calling abuild over here
+        await SUPERVISOR_COMMS.asend(mssg)
 
     def _build_set_message(self, key: str, value: JsonValue) -> ToSupervisor:
         from airflow.sdk.execution_time.comms import SetAssetStateStoreByName, SetAssetStateStoreByUri
@@ -791,6 +897,38 @@ class AssetStateStoreAccessor:
             msg = SetAssetStateStoreByName(name=self._name, key=key, value=stored)
         elif self._uri:
             msg = SetAssetStateStoreByUri(uri=self._uri, key=key, value=stored)
+        return msg
+
+    async def _abuild_set_message(self, key: str, value: JsonValue) -> ToSupervisor:
+        if value is None:
+            raise ValueError("Cannot set value as None")
+        # if custom backend is configured, store the value on the custom backend, and return the reference
+        # to the stored value to store in the DB
+        backend = _get_worker_state_store_backend()
+        stored: JsonValue = value
+        if backend is not None:
+            scope = AssetScope(name=self._name, uri=self._uri)
+            ref = await backend.aserialize_asset_state_store_to_ref(
+                value=value, key=key, scope=scope
+            )  # converted serialize to aserilalize
+            stored = _wrap_external_ref(ref)
+        if (limit := conf.getint("state_store", "max_value_storage_bytes")) > 0:
+            serialized_size = len(json.dumps(stored))
+            if serialized_size > limit:
+                log.warning(
+                    "Asset store value for key %r is %d bytes, which exceeds configured max_value_storage_bytes=%d. "
+                    "Consider configuring [workers] state_store_backend to offload large payloads.",
+                    key,
+                    serialized_size,
+                    limit,
+                )
+        msg: ToSupervisor
+        if self._name:
+            msg = SetAssetStateStoreByName(name=self._name, key=key, value=stored)
+        elif self._uri:
+            msg = SetAssetStateStoreByUri(uri=self._uri, key=key, value=stored)
+        else:
+            raise ValueError("at least a value should be provided asset name or url")
         return msg
 
     def delete(self, key: str) -> None:

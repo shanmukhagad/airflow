@@ -123,6 +123,7 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
 
     operator_extra_links = (GlueJobRunDetailsLink(),)
     TASK_UUID_ARG = "--airflow_task_uuid"
+    TASK_UUID_SCAN_MAX_PAGES = 20
 
     def __init__(
         self,
@@ -249,14 +250,22 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
             script_args[self.TASK_UUID_ARG] = task_uuid
         return script_args, task_uuid
 
-    def _find_job_run_id_by_task_uuid(self, task_uuid: str) -> tuple[str, str] | None:
+    def _find_job_run_id_by_task_uuid(
+        self, task_uuid: str, context: Context
+    ) -> tuple[str, str] | None:
+        dag_run_start_date = context["dag_run"].start_date
         next_token: str | None = None
-        while True:
+        pages_scanned = 0
+        while pages_scanned < self.TASK_UUID_SCAN_MAX_PAGES:
+            pages_scanned += 1
             request = {"JobName": self.job_name, "MaxResults": 50}
             if next_token:
                 request["NextToken"] = next_token
             response = self.hook.conn.get_job_runs(**request)
             for job_run in response.get("JobRuns", []):
+                started_on = job_run.get("StartedOn")
+                if started_on and started_on < dag_run_start_date:
+                    return None
                 args = job_run.get("Arguments", {}) or {}
                 if args.get(self.TASK_UUID_ARG) == task_uuid:
                     job_run_id = job_run.get("Id")
@@ -266,6 +275,11 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
             next_token = response.get("NextToken")
             if not next_token:
                 return None
+        self.log.warning(
+            "Stopped searching for Glue job run by task UUID after %s pages.",
+            self.TASK_UUID_SCAN_MAX_PAGES,
+        )
+        return None
 
     def execute(self, context: Context):
         """
@@ -299,7 +313,7 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
                     self.log.warning("Failed to get previous Glue job run state", exc_info=True)
             elif task_uuid:
                 try:
-                    existing = self._find_job_run_id_by_task_uuid(task_uuid)
+                    existing = self._find_job_run_id_by_task_uuid(task_uuid, context)
                     if existing:
                         existing_job_run_id, existing_job_run_state = existing
                         self.log.info(
@@ -310,8 +324,12 @@ class GlueJobOperator(AwsBaseOperator[GlueJobHook]):
                         if existing_job_run_state in ("RUNNING", "STARTING"):
                             self._job_run_id = existing_job_run_id
                             ti.xcom_push(key="glue_job_run_id", value=self._job_run_id)
-                except Exception:
-                    self.log.warning("Failed to find previous Glue job run by task UUID", exc_info=True)
+                except ClientError as error:
+                    self.log.error(
+                        "Failed to find previous Glue job run by task UUID: %s",
+                        error,
+                        exc_info=True,
+                    )
 
         if not self._job_run_id:
             self.log.info(

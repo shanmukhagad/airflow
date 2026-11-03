@@ -290,6 +290,25 @@ class SafeOtelLogger:
         if self._is_recordable(stat):
             self.metrics_map.set_gauge_value(full_name(prefix=self.prefix, name=stat), value, delta, tags)
 
+    def observable_gauge(
+        self,
+        stat: str,
+        callback: Callable[[], int | float],
+        *,
+        tags: Attributes = None,
+    ) -> None:
+        """
+        Register a Gauge whose value is read from ``callback`` each time OTel collects metrics.
+
+        :param stat: The name of the stat.
+        :param callback: Function with no arguments that returns the current value.
+        :param tags: Tags to append to the stat.
+        """
+        if self._is_recordable(stat):
+            self.metrics_map.register_observable_gauge(
+                full_name(prefix=self.prefix, name=stat), callback, tags
+            )
+
     def timing(
         self,
         stat: str,
@@ -353,10 +372,12 @@ class MetricsMap:
         self.meter = meter
         self.map = {}
         self.histograms: dict[str, InternalHistogram] = {}
+        self.observable_gauges = {}
 
     def clear(self) -> None:
         self.map.clear()
         self.histograms.clear()
+        self.observable_gauges.clear()
 
     def _create_counter(self, name):
         """Create a new counter or up_down_counter for the provided name."""
@@ -409,6 +430,26 @@ class MetricsMap:
             self.map[key] = InternalGauge(meter=self.meter, name=name, tags=tags)
 
         self.map[key].set_value(value, delta)
+
+    def register_observable_gauge(self, name: str, callback, tags: Attributes) -> None:
+        """
+        Register a gauge whose value is read from the callback every time OTel collects metrics.
+
+        OTel ignores a second instrument created with the same name, so only one is created per
+        name. It reads the callback of every tag set registered under that name.
+        """
+        sources = self.observable_gauges.setdefault(name, [])
+        sources.append((callback, tags))
+        if len(sources) > 1:
+            return
+
+        def observe(options):
+            for read_value, attributes in sources:
+                yield metrics.Observation(read_value(), attributes=attributes)
+
+        otel_safe_name = _get_otel_safe_name(name)
+        self.meter.create_observable_gauge(name=otel_safe_name, callbacks=[observe])
+        log.debug("Created %s as an observable gauge", otel_safe_name)
 
     def record_histogram_value(self, name: str, value: float, tags: Attributes) -> None:
         """

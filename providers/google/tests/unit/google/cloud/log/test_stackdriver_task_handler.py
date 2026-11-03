@@ -22,7 +22,8 @@ from pathlib import Path
 from unittest import mock
 from unittest.mock import PropertyMock
 from urllib.parse import parse_qs, urlsplit
-
+from unittest.mock import MagicMock, patch
+from google.cloud.logging.handlers.transports import SyncTransport
 import pytest
 from google.cloud.logging import Resource
 from google.cloud.logging_v2.types import ListLogEntriesRequest, ListLogEntriesResponse, LogEntry
@@ -33,6 +34,9 @@ from airflow.providers.google.cloud.log.stackdriver_task_handler import (
 )
 from airflow.utils import timezone
 from airflow.utils.state import TaskInstanceState
+
+import pytest
+from airflow.exceptions import AirflowProviderDeprecationWarning
 
 from tests_common.test_utils.config import conf_vars
 from tests_common.test_utils.db import clear_db_dags, clear_db_runs
@@ -721,11 +725,12 @@ class TestStackdriverLoggingHandlerTask:
 
 class TestStackdriverTaskHandlerExceptionHandling:
     """Cloud Logging failures must degrade gracefully, not leak internals."""
-
+    @mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler._logger")
     @mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.get_credentials_and_project_id")
     @mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.LoggingServiceV2Client")
+    
     def test_read_falls_back_when_cloud_logging_unavailable(
-        self, mock_client, mock_get_creds_and_project_id, caplog
+        self, mock_client, mock_get_creds_and_project_id, mock_logger
     ):
         """``read()`` must surface a user-facing message when Cloud Logging raises.
 
@@ -748,14 +753,14 @@ class TestStackdriverTaskHandlerExceptionHandling:
         ti.logical_date = mock.MagicMock(isoformat=lambda: "2020-01-01T00:00:00+00:00")
         ti.execution_date = ti.logical_date
 
-        with caplog.at_level(logging.ERROR):
-            logs, metadata = handler.read(ti, try_number=1)
+        logs, metadata = handler.read(ti, try_number=1)
 
         # The user-facing message must NOT include the project id / internal details.
         message = logs[0][0][1]
         assert "Cloud Logging is currently unavailable" in message
         assert "secret-project-id" not in message
         assert metadata == [{"end_of_log": True}]
+        mock_logger.exception.assert_called_once()
 
     @mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.get_credentials_and_project_id")
     @mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.LoggingServiceV2Client")
@@ -776,7 +781,7 @@ class TestStackdriverTaskHandlerExceptionHandling:
             "service account 'sa@project.iam.gserviceaccount.com' lacks logging.logEntries.list"
         )
 
-        handler = StackdriverTaskHandler()
+        handler = StackdriverTaskHandler(gcp_log_name="airflow")
         ti = mock.MagicMock()
         ti.task_id = "t"
         ti.dag_id = "d"
@@ -808,3 +813,63 @@ class TestStackdriverTaskHandlerExceptionHandling:
         captured = capsys.readouterr()
         assert "transport flush failed" in captured.err
         assert "flush failed during shutdown" in captured.err
+
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.get_credentials_and_project_id")
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.gcp_logging.Client")
+def test_stackdriver_handler_defaults_to_sync_transport(mock_client, mock_get_creds):
+    """Verify handler defaults to SyncTransport to avoid background thread streaming delays."""
+    mock_get_creds.return_value = ("creds", "project_id")
+    handler = StackdriverTaskHandler(gcp_log_name="airflow")
+    assert handler.io.transport_type == SyncTransport
+
+
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.get_credentials_and_project_id")
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.gcp_logging.Client")
+def test_stackdriver_handler_emit_flushes_transport(mock_client, mock_get_creds):
+    """Verify emit triggers transport send and flush synchronously."""
+    mock_get_creds.return_value = ("creds", "project_id")
+    handler = StackdriverTaskHandler(gcp_log_name="airflow")
+
+    mock_transport = mock.MagicMock()
+    handler.io.transport = mock_transport
+
+    record = logging.LogRecord(
+        name="airflow.task",
+        level=logging.INFO,
+        pathname="example_dag.py",
+        lineno=15,
+        msg="Execution line test",
+        args=(),
+        exc_info=None,
+    )
+    handler.emit(record)
+
+    mock_transport.send.assert_called_once()
+    mock_transport.flush.assert_called_once()
+
+
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.get_credentials_and_project_id")
+@mock.patch("airflow.providers.google.cloud.log.stackdriver_task_handler.gcp_logging.Client")
+def test_stackdriver_handler_emit_swallows_flush_exception(mock_client, mock_get_creds):
+    """Verify transport flush errors during emit do not crash task execution."""
+    mock_get_creds.return_value = ("creds", "project_id")
+    handler = StackdriverTaskHandler(gcp_log_name="airflow")
+
+    mock_transport = mock.MagicMock()
+    mock_transport.flush.side_effect = RuntimeError("GCP connection timeout")
+    handler.io.transport = mock_transport
+
+    record = logging.LogRecord(
+        name="airflow.task",
+        level=logging.INFO,
+        pathname="example_dag.py",
+        lineno=20,
+        msg="Test message during outage",
+        args=(),
+        exc_info=None,
+    )
+
+    # Must execute smoothly without propagating RuntimeError
+    handler.emit(record)
+    mock_transport.send.assert_called_once()
+    mock_transport.flush.assert_called_once()

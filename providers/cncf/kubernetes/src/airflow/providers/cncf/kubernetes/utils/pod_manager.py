@@ -809,6 +809,7 @@ class PodManager(LoggingMixin):
         istio_enabled: bool = False,
         container_name: str = "base",
         do_xcom_push: bool = False,
+        skip_waiting_for_sidecars: bool = False,
     ) -> V1Pod:
         """
         Monitor a pod and return the final state.
@@ -823,7 +824,8 @@ class PodManager(LoggingMixin):
             remote_pod = self.read_pod(pod)
             if remote_pod.status.phase in PodPhase.terminal_states:
                 break
-            if (istio_enabled or do_xcom_push) and container_is_completed(remote_pod, container_name):
+            sidecar_bypass = istio_enabled or do_xcom_push or skip_waiting_for_sidecars
+            if sidecar_bypass and container_is_completed(remote_pod, container_name):
                 self.log.info(
                     "Container '%s' completed but pod %s still has phase %s "
                     "(likely due to a sidecar container). Skipping waiting for pod completion.",
