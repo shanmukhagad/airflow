@@ -39,7 +39,6 @@ import copy    # added import
 import kubernetes
 import pendulum
 import tenacity
-_POD_PREEMPTION_MAX_ATTEMPTS = 3   # added param
 from kubernetes.client import CoreV1Api, V1Pod, models as k8s
 from kubernetes.client.exceptions import ApiException
 from kubernetes.stream import stream
