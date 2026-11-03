@@ -31,7 +31,7 @@ from kubernetes.client import models as k8s
 from kubernetes.client.rest import ApiException
 from sqlalchemy import inspect
 from urllib3 import HTTPResponse
-from urllib3.exceptions import ProtocolError
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 from airflow.jobs.job import Job
 from airflow.models.taskinstancekey import TaskInstanceKey
@@ -315,46 +315,6 @@ class TestAirflowKubernetesScheduler:
         # monkey-patching should not affect the class constant
         assert kube_executor.RUNNING_POD_LOG_LINES == 100
         assert kube_executor_2.RUNNING_POD_LOG_LINES == 200
-
-    @staticmethod
-    def _make_scheduler_for_pod_creation():
-        # Skip the real __init__ so we don't need a cluster
-        with mock.patch.object(AirflowKubernetesScheduler, "__init__", return_value=None):
-            scheduler = AirflowKubernetesScheduler()
-        scheduler.kube_client = mock.MagicMock()
-        scheduler.kube_config = mock.MagicMock()
-        scheduler.team_name = None
-        scheduler.kube_client.api_client.sanitize_for_serialization.return_value = {}
-        return scheduler
-
-    @staticmethod
-    def _connection_error():
-        return ProtocolError(
-            "Connection aborted.", RemoteDisconnected("Remote end closed connection without response")
-        )
-
-    @mock.patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor_utils.time.sleep")
-    def test_run_pod_async_retries_connection_error_then_raises(self, mock_sleep):
-        scheduler = self._make_scheduler_for_pod_creation()
-        scheduler.kube_client.create_namespaced_pod.side_effect = self._connection_error()
-        pod = k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="test-pod", namespace="default"))
-
-        with pytest.raises(ProtocolError):
-            scheduler.run_pod_async(pod)
-
-        assert scheduler.kube_client.create_namespaced_pod.call_count == 3
-        assert [call.args[0] for call in mock_sleep.call_args_list] == [1, 2]
-
-    @mock.patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor_utils.time.sleep")
-    def test_run_pod_async_succeeds_after_connection_error(self, mock_sleep):
-        scheduler = self._make_scheduler_for_pod_creation()
-        scheduler.kube_client.create_namespaced_pod.side_effect = [self._connection_error(), "pod-created"]
-        pod = k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="test-pod", namespace="default"))
-
-        resp = scheduler.run_pod_async(pod)
-
-        assert resp == "pod-created"
-        assert scheduler.kube_client.create_namespaced_pod.call_count == 2
 
 
 class TestKubernetesExecutor:
@@ -703,6 +663,89 @@ class TestKubernetesExecutor:
                     assert kubernetes_executor.task_queue.empty()
                     if task_expected_state != State.SUCCESS:
                         assert kubernetes_executor.event_buffer[task_instance_key][0] == task_expected_state
+                else:
+                    assert kubernetes_executor.task_queue.empty()
+                    assert kubernetes_executor.event_buffer[task_instance_key][0] == task_expected_state
+            finally:
+                kubernetes_executor.end()
+
+    @pytest.mark.parametrize(
+        ("exception", "task_publish_max_retries", "should_requeue", "task_expected_state"),
+        [
+            pytest.param(
+                ProtocolError("Connection aborted.", RemoteDisconnected("Remote end closed connection")),
+                1,
+                True,
+                State.SUCCESS,
+                id="ProtocolError (retry succeeded)",
+            ),
+            pytest.param(
+                ReadTimeoutError(None, None, "Read timed out."),
+                1,
+                True,
+                State.SUCCESS,
+                id="ReadTimeoutError (retry succeeded)",
+            ),
+            pytest.param(
+                ProtocolError("Connection aborted.", RemoteDisconnected("Remote end closed connection")),
+                0,
+                False,
+                State.FAILED,
+                id="ProtocolError (no retries left)",
+            ),
+        ],
+    )
+    @mock.patch("airflow.providers.cncf.kubernetes.executors.kubernetes_executor_utils.KubernetesJobWatcher")
+    @mock.patch("airflow.providers.cncf.kubernetes.kube_client.get_kube_client")
+    def test_run_next_connection_error_requeue(
+        self,
+        mock_get_kube_client,
+        mock_kubernetes_job_watcher,
+        exception,
+        task_publish_max_retries,
+        should_requeue,
+        task_expected_state,
+        data_file,
+    ):
+        """
+        A transient connection error while creating a pod must not crash the scheduler.
+        The task is re-queued for the next sync while retries are left, otherwise it is failed.
+        """
+        template_file = data_file("pods/generator_base_with_secrets.yaml").as_posix()
+        mock_kube_client = mock.patch("kubernetes.client.CoreV1Api", autospec=True)
+        mock_kube_client.create_namespaced_pod = mock.MagicMock(side_effect=exception)  # type: ignore[attr-defined]
+        mock_get_kube_client.return_value = mock_kube_client
+        mock_api_client = mock.MagicMock()
+        mock_api_client.sanitize_for_serialization.return_value = {}
+        mock_kube_client.api_client = mock_api_client  # type: ignore[attr-defined]
+        config = {
+            ("kubernetes_executor", "pod_template_file"): template_file,
+        }
+        with conf_vars(config):
+            kubernetes_executor = self.kubernetes_executor
+            kubernetes_executor.task_publish_max_retries = task_publish_max_retries
+            kubernetes_executor.start()
+            try:
+                task_instance_key = TaskInstanceKey("dag", "task", "run_id", 1)
+                kubernetes_executor.execute_async(
+                    key=task_instance_key,
+                    queue=None,
+                    command=["airflow", "tasks", "run", "true", "some_parameter"],
+                )
+                kubernetes_executor.sync()
+
+                assert mock_kube_client.create_namespaced_pod.call_count == 1  # type: ignore[attr-defined]
+
+                if should_requeue:
+                    assert not kubernetes_executor.task_queue.empty()
+
+                    # The connection is back: the next sync should create the pod
+                    mock_kube_client.create_namespaced_pod.side_effect = None  # type: ignore[attr-defined]
+                    mock_kube_client.create_namespaced_pod.reset_mock()  # type: ignore[attr-defined]
+
+                    kubernetes_executor.sync()
+                    assert mock_kube_client.create_namespaced_pod.called  # type: ignore[attr-defined]
+                    assert kubernetes_executor.task_queue.empty()
                 else:
                     assert kubernetes_executor.task_queue.empty()
                     assert kubernetes_executor.event_buffer[task_instance_key][0] == task_expected_state

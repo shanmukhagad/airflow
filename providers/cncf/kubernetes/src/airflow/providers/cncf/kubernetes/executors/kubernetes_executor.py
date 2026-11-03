@@ -32,12 +32,14 @@ import time
 from collections import Counter, defaultdict
 from contextlib import suppress
 from datetime import datetime, timedelta
+from http.client import RemoteDisconnected
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any
 
 from deprecated import deprecated
 from kubernetes.dynamic import DynamicClient
 from sqlalchemy import select
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
 
 from airflow.exceptions import AirflowProviderDeprecationWarning
 from airflow.executors.base_executor import BaseExecutor
@@ -118,7 +120,11 @@ class KubernetesExecutor(BaseExecutor):
 
     def _handle_infra_failure(self, key: TaskInstanceKey, termination_reason: str | None = None) -> None:
         """Handle infrastructure failure by re-queuing the task without consuming retry attempts."""
-        self.log.warning("Handling infrastructure failure for task %s. Reason: %s. Re-queuing task.", key, termination_reason)
+        self.log.warning(
+            "Handling infrastructure failure for task %s. Reason: %s. Re-queuing task.",
+            key,
+            termination_reason,
+        )
         self.event_buffer[key] = TaskInstanceState.QUEUED, f"Infrastructure failure: {termination_reason}"
 
     @staticmethod
@@ -135,7 +141,7 @@ class KubernetesExecutor(BaseExecutor):
                 return False
             if not failure_details:
                 return False
-            
+
             container_reason = failure_details.get("container_reason")
             if container_reason and container_reason in excluded_container_reasons:
                 return False
@@ -490,6 +496,26 @@ class KubernetesExecutor(BaseExecutor):
                         key = task.key
                         self.fail(key, e)
                         self.task_publish_retries.pop(key, None)
+                except (ProtocolError, RemoteDisconnected, ConnectionError, ReadTimeoutError) as e:
+                    retries = self.task_publish_retries[key]
+                    can_retry_publish = (
+                        self.task_publish_max_retries == -1 or retries < self.task_publish_max_retries
+                    )
+                    if can_retry_publish:
+                        self.log.warning(
+                            "[Try %s of %s] Connection error while creating pod for Task: (%s). "
+                            "Re-queuing for the next sync. Error: %r",
+                            retries + 1,
+                            self.task_publish_max_retries,
+                            key,
+                            e,
+                        )
+                        self.task_queue.put(task)
+                        self.task_publish_retries[key] = retries + 1
+                        break
+                    self.log.error("Pod creation failed with connection error %r. Failing task", e)
+                    self.fail(key, e)
+                    self.task_publish_retries.pop(key, None)
                 except PodMutationHookException as e:
                     key = task.key
                     self.log.error(
@@ -525,6 +551,7 @@ class KubernetesExecutor(BaseExecutor):
             ti_state = None
             try:
                 from airflow.models.taskinstance import TaskInstance
+
                 filter_for_tis = TaskInstance.filter_for_tis([key])
                 if filter_for_tis is not None:
                     ti_state = session.scalar(select(TaskInstance.state).where(filter_for_tis))
@@ -581,7 +608,7 @@ class KubernetesExecutor(BaseExecutor):
                     "Task %s failed in pod %s/%s (no details available)", task_key_str, namespace, pod_name
                 )
 
-        if state == ADOPTED or state =="adopted":
+        if state == ADOPTED or state == "adopted":
             # When the task pod is adopted by another executor,
             # then remove the task from the current executor running queue.
             try:
