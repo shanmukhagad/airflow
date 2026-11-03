@@ -48,6 +48,9 @@ class _PostgresServerSideCursorDecorator:
 
     def __init__(self, cursor):
         self.cursor = cursor
+        # Iteration observes the cursor's itersize; preserve one iterator because older psycopg3 creates a
+        # new generator for each iter() call.
+        self._rows_iterator = iter(cursor)
         self.rows = []
         self.initialized = False
 
@@ -57,19 +60,10 @@ class _PostgresServerSideCursorDecorator:
 
     def __next__(self):
         """Fetch next row from the cursor."""
-        if USE_PSYCOPG3:
-            if self.rows:
-                return self.rows.pop()
-            self.initialized = True
-            row = self.cursor.fetchone()
-            if row is None:
-                raise StopIteration
-            return row
-        # psycopg2
         if self.rows:
             return self.rows.pop()
         self.initialized = True
-        return next(self.cursor)
+        return next(self._rows_iterator)
 
     @property
     def description(self):
