@@ -202,6 +202,39 @@ class TestSSHRemoteJobOperator:
         with pytest.raises(AirflowException, match="command not specified"):
             op.execute({})
 
+    def test_init_does_not_validate_remote_base_dir(self):
+        """Test that __init__ does not validate remote_base_dir, which may be an unrendered template."""
+        op = SSHRemoteJobOperator(
+            task_id="test_task",
+            ssh_conn_id="test_conn",
+            command="/path/to/script.sh",
+            remote_base_dir="/tmp/../etc",
+        )
+        assert op.remote_base_dir == "/tmp/../etc"
+
+    @pytest.mark.parametrize(
+        ("rendered_base_dir", "error_match"),
+        [
+            pytest.param("/tmp/../etc", "path traversal not allowed", id="path-traversal"),
+            pytest.param("", "cannot be empty", id="empty"),
+            pytest.param("/tmp/jobs\x00", "null bytes", id="null-byte"),
+        ],
+    )
+    def test_execute_validates_rendered_remote_base_dir(self, rendered_base_dir, error_match):
+        """Test that execute validates the rendered remote_base_dir before connecting."""
+        op = SSHRemoteJobOperator(
+            task_id="test_task",
+            ssh_conn_id="test_conn",
+            command="echo hello",
+            remote_base_dir="{{ params.base_dir }}",
+        )
+        op.render_template_fields({"params": {"base_dir": rendered_base_dir}})
+
+        with pytest.raises(ValueError, match=error_match):
+            op.execute({})
+
+        self.mock_hook.get_conn.assert_not_called()
+
     @mock.patch.object(SSHRemoteJobOperator, "defer")
     def test_execute_complete_re_defers_if_not_done(self, mock_defer):
         """Test that execute_complete re-defers if job is not done."""
