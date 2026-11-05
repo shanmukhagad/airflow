@@ -2,36 +2,27 @@
   "assetSchedule": "{{count}} of {{total}} assets updated",
   "dagActions": {
     "delete": {
-      "button": "Delete $t(common:dag_one)",
-      "warning": "This will remove all metadata related to the $t(common:dag_one), including Runs and $t(common:task_other)."
+      "button": "Delete Dag",
+      "warning": "This will remove all metadata related to the Dag, including Runs and Tasks."
     }
   },
-  "favoriteDag": "Favorite $t(common:dag_one)",
+  "favoriteDag": "Favorite Dag",
   "filters": {
     "allRunTypes": "All Run Types",
     "allStates": "All States",
     "anyRunState": "Any run",
-    "anyRunStatePlaceholder": "Select any run state…",
     "favorite": {
       "all": "All",
       "favorite": "Favorite",
       "unfavorite": "Unfavorite"
     },
-    "favoriteState": "Favorite state",
-    "favoriteStatePlaceholder": "Select favorite state…",
     "lastRunState": "Last run",
-    "lastRunStatePlaceholder": "Select last run state…",
-    "noTimetableTypesFound": "No timetable types found",
     "paused": {
-      "active": "Not paused",
+      "active": "Active",
       "all": "All",
       "paused": "Paused"
     },
-    "pausedPlaceholder": "Select paused state…",
-    "pausedState": "Paused state",
-    "requiresHitlAction": "Requires HITL action",
-    "runIdPatternFilter": "Search Dag Runs",
-    "timetableType": "Timetable type"
+    "runIdPatternFilter": "Search Dag Runs"
   },
   "ownerLink": "Owner link for {{owner}}",
   "runAndTaskActions": {
@@ -79,7 +70,6 @@
       "downstream": "Downstream",
       "existingTasks": "Clear existing tasks",
       "future": "Future",
-      "keepTaskState": "Keep task state and resume",
       "onlyFailed": "Clear only failed tasks",
       "past": "Past",
       "preventRunningTasks": "Prevent rerun if task is running",
@@ -89,45 +79,21 @@
       "upstream": "Upstream"
     }
   },
-  "runStateCounts": {
-    "label": "Run states",
-    "loading": "Loading run state counts",
-    "tooltip": "{{state}}: {{formattedCount}} — click to filter runs"
-  },
-  "schedulingActions": {
-    "cancelDrain": "Cancel drain",
-    "drain": "Drain then pause",
-    "drainPrompt": "This Dag has Dag runs in progress. Draining lets them finish before the Dag pauses; pausing now stops scheduling immediately without waiting for them.",
-    "pauseNow": "Pause now",
-    "pauseSelected": "Pause / Drain"
-  },
-  "schedulingBanner": {
-    "message": "This Dag is draining. It will pause once its running Dag runs finish."
-  },
-  "schedulingState": {
-    "active": "Active",
-    "draining": "Draining",
-    "drainingBadgeTooltip": "This Dag pauses once its running Dag runs finish.",
-    "drainingTooltip": "Draining {{dagDisplayName}} — pauses once running Dag runs finish. Click to resume.",
-    "label": "Scheduling state",
-    "paused": "Paused",
-    "placeholder": "Select scheduling state…"
-  },
   "search": {
     "advanced": "Advanced Search",
     "clear": "Clear search",
-    "dags": "Search $t(common:dag_other)",
+    "dags": "Search Dags",
     "hotkey": "+K",
-    "tasks": "Search $t(common:task_other)"
+    "tasks": "Search Tasks"
   },
   "sort": {
     "displayName": {
       "asc": "Sort by Display Name (A-Z)",
       "desc": "Sort by Display Name (Z-A)"
     },
-    "lastRunAfter": {
-      "asc": "Sort by Latest Run After (Earliest-Latest)",
-      "desc": "Sort by Latest Run After (Latest-Earliest)"
+    "lastRunStartDate": {
+      "asc": "Sort by Latest Run Start Date (Earliest-Latest)",
+      "desc": "Sort by Latest Run Start Date (Latest-Earliest)"
     },
     "lastRunState": {
       "asc": "Sort by Latest Run State (A-Z)",
@@ -139,5 +105,5 @@
     },
     "placeholder": "Sort by"
   },
-  "unfavoriteDag": "Unfavorite $t(common:dag_one)"
+  "unfavoriteDag": "Unfavorite Dag"
 }

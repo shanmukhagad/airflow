@@ -22,7 +22,7 @@ from typing import Annotated, Literal, cast
 
 import structlog
 from fastapi import Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.selectable import Select
 
@@ -46,7 +46,6 @@ from airflow.api_fastapi.common.db.common import (
     bounded_total_entries,
     paginated_select,
 )
-from airflow.api_fastapi.common.db.dags import eager_load_teams
 from airflow.api_fastapi.common.db.task_instances import eager_load_TI_and_TIH_for_validation
 from airflow.api_fastapi.common.parameters import (
     FilterOptionEnum,
@@ -77,7 +76,6 @@ from airflow.api_fastapi.common.parameters import (
     Range,
     RangeFilter,
     SortParam,
-    _DagIdTeamsFilter,
     _PrefixSearchParam,
     _SearchParam,
     datetime_range_filter_factory,
@@ -85,7 +83,6 @@ from airflow.api_fastapi.common.parameters import (
     float_range_filter_factory,
     prefix_search_param_factory,
     search_param_factory,
-    teams_filter_factory,
 )
 from airflow.api_fastapi.common.router import AirflowRouter
 from airflow.api_fastapi.core_api.base import OrmClause
@@ -107,8 +104,6 @@ from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_
 from airflow.api_fastapi.core_api.security import GetUserDep, ReadableTIFilterDep, requires_access_dag
 from airflow.api_fastapi.core_api.services.public.task_instances import (
     BulkTaskInstanceService,
-    _discard_task_state_store,
-    _get_task_group_task_ids,
     _get_task_group_task_instances,
     _patch_task_group_state,
     _patch_task_instance_note,
@@ -151,7 +146,6 @@ def get_task_instance(
         .options(joinedload(TI.rendered_task_instance_fields))
         .options(joinedload(TI.dag_version))
         .options(joinedload(TI.dag_run).options(joinedload(DagRun.dag_model)))
-        .options(*eager_load_teams(TI.dag_run, DagRun.dag_model))
     )
     task_instance = session.scalar(query)
 
@@ -385,7 +379,10 @@ def get_task_instance_tries(
         ).options(joinedload(orm_object.hitl_detail))
         return query
 
-    tis = session.scalars(_query(TI)).all()
+    # Exclude TaskInstance with state UP_FOR_RETRY since they have been recorded in TaskInstanceHistory
+    tis = session.scalars(
+        _query(TI).where(or_(TI.state != TaskInstanceState.UP_FOR_RETRY, TI.state.is_(None)))
+    ).all()
     task_instances = list(session.scalars(_query(TIH)).all()) + list(tis)
 
     if not task_instances:
@@ -439,7 +436,6 @@ def get_mapped_task_instance(
         .options(joinedload(TI.rendered_task_instance_fields))
         .options(joinedload(TI.dag_version))
         .options(joinedload(TI.dag_run).options(joinedload(DagRun.dag_model)))
-        .options(*eager_load_teams(TI.dag_run, DagRun.dag_model))
     )
     task_instance = session.scalar(query)
 
@@ -490,7 +486,6 @@ def get_task_instances(
     queue_name_prefix_pattern: QueryTIQueueNamePrefixPatternSearch,
     executor: QueryTIExecutorFilter,
     version_number: QueryTIDagVersionFilter,
-    teams: Annotated[_DagIdTeamsFilter, Depends(teams_filter_factory(TI.dag_id))],
     try_number: QueryTITryNumberFilter,
     operator: QueryTIOperatorFilter,
     operator_name_pattern: QueryTIOperatorNamePatternSearch,
@@ -610,7 +605,6 @@ def get_task_instances(
         map_index,
         rendered_map_index_pattern,
         rendered_map_index_prefix_pattern,
-        teams,
     ]
 
     if use_cursor:
@@ -904,14 +898,6 @@ def post_clear_task_instances(
     if future:
         body.end_date = None
 
-    # A task group has no per-task list at the call site; resolve every task in it from the dag
-    # structure so all are cleared, not just the first page the UI could enumerate.
-    if body.task_group_id is not None:
-        body.task_ids = cast(
-            "list[str | tuple[str, int]]",
-            _get_task_group_task_ids(dag_id, body.task_group_id, dag),
-        )
-
     if (task_markers_to_clear := body.task_ids) is not None:
         mapped_tasks_tuples = {t for t in task_markers_to_clear if isinstance(t, tuple)}
         # Unmapped tasks are expressed in their task_ids (without map_indexes)
@@ -992,13 +978,6 @@ def post_clear_task_instances(
             )
         except AirflowClearRunningTaskException as e:
             raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
-
-        # After the clear has succeeded, so a failed clear cannot take the task state with it.
-        # This is the only clear path that discards task state today; Dag-run clear and
-        # mark-as-failed/success (which clear downstream tasks) still keep it unconditionally.
-        # It is tracked through https://github.com/apache/airflow/issues/72929
-        if not body.keep_task_state:
-            _discard_task_state_store(task_instances, session, event="Discarded task state on clear")
 
         if body.note is not None:
             _patch_task_instance_note(
