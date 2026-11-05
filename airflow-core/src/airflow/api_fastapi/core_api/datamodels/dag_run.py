@@ -136,11 +136,6 @@ class BaseDAGRunClear(StrictBaseModel):
         description="Whether to preserve task state store entries when clearing tasks.",
     )
     note: str | None = Field(default=None, max_length=1000)
-    # added+
-    keep_task_state: bool = Field(
-        default=False,
-        description="Keep the task state store entries on clear. Default is False (state gets discarded).",
-    )
 
     @model_validator(mode="before")
     @classmethod

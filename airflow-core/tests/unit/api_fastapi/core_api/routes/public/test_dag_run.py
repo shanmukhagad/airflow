@@ -2258,37 +2258,12 @@ class TestClearDagRun:
             only_failed=False,
             run_on_latest_version=False,
             session=mock.ANY,
-            keep_task_state=False, #ADDED
         )
         _check_last_log(
             session,
             dag_id=DAG1_ID,
             event="clear_dag_run",
             logical_date=None,
-        )
-    # added new test case 
-    @mock.patch("airflow.serialization.definitions.dag.SerializedDAG.clear")
-    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
-    def test_clear_dag_run_keep_task_state(self, mock_clear, test_client, session):
-        """Verify that POST /clear endpoint respects the keep_task_state payload parameter."""
-        mock_clear.return_value = 2
-        response = test_client.post(
-            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/clear",
-            json={
-                "dry_run": False,
-                "only_failed": False,
-                "keep_task_state": True,
-            },
-        )
-        assert response.status_code == 200
-        mock_clear.assert_called_once_with(
-            run_id=DAG1_RUN1_ID,
-            task_ids=None,
-            only_new=False,
-            only_failed=False,
-            run_on_latest_version=False,
-            session=mock.ANY,
-            keep_task_state=True,
         )
 
     def test_clear_dag_run_only_new_and_only_failed_mutually_exclusive(self, test_client):

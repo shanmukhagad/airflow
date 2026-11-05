@@ -84,71 +84,6 @@ export type AssetEventResponse = {
 };
 
 /**
- * An asset alias leaf: ``{"alias": {"name": ..., "group": ...}}``.
- */
-export type AssetExpressionAlias = {
-    alias: AssetExpressionAliasInfo;
-};
-
-/**
- * Body of an ``alias`` leaf node.
- */
-export type AssetExpressionAliasInfo = {
-    name: string;
-    group: string;
-};
-
-/**
- * An "and" node: ``{"all": [...]}`` -- satisfied when all children are satisfied.
- */
-export type AssetExpressionAll = {
-    all: Array<(AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll)>;
-};
-
-/**
- * An "or" node: ``{"any": [...]}`` -- satisfied when any child is satisfied.
- */
-export type AssetExpressionAny = {
-    any: Array<(AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll)>;
-};
-
-/**
- * An asset leaf: ``{"asset": {"uri": ..., "name": ..., "group": ...}}``.
- */
-export type AssetExpressionAsset = {
-    asset: AssetExpressionAssetInfo;
-};
-
-/**
- * Body of an ``asset`` leaf node.
- *
- * ``id`` is injected by ``DagModelOperation.update_dag_asset_expression`` when the expression is
- * persisted; ``BaseAsset.as_expression()`` itself only emits ``uri``/``name``/``group``. It is left
- * optional so a row persisted before id-enrichment (or migrated from the pre-3.0 dataset format)
- * degrades gracefully instead of failing response validation.
- *
- * A leaf the caller is not authorized to read is served with ``hidden`` set and ``uri``, ``name``
- * and ``id`` blanked (see ``airflow.api_fastapi.common.asset_expression``), so the shape of the
- * schedule stays visible without revealing which asset it waits on.
- */
-export type AssetExpressionAssetInfo = {
-    uri: string | null;
-    name: string | null;
-    group: string;
-    id?: number | null;
-    hidden?: boolean;
-};
-
-/**
- * An unresolved asset reference leaf: ``{"asset_ref": {"name": ...}}`` or ``{"asset_ref": {"uri": ...}}``.
- */
-export type AssetExpressionRef = {
-    asset_ref: {
-        [key: string]: (string);
-    };
-};
-
-/**
  * Asset serializer for responses.
  */
 export type AssetResponse = {
@@ -243,29 +178,6 @@ export type BackfillCollectionResponse = {
 };
 
 /**
- * BackfillDagRun Collection serializer for responses.
- */
-export type BackfillDagRunCollectionResponse = {
-    backfill_dag_runs: Array<BackfillDagRunResponse>;
-    total_entries: number;
-};
-
-/**
- * Serializer for a single BackfillDagRun entry with joined DagRun state.
- */
-export type BackfillDagRunResponse = {
-    id: number;
-    backfill_id: number;
-    dag_id: string;
-    dag_run_id?: string | null;
-    logical_date: string | null;
-    partition_key: string | null;
-    sort_ordinal: number;
-    exception_reason: string | null;
-    dag_run_state?: DagRunState | null;
-};
-
-/**
  * Object used for create backfill request.
  */
 export type BackfillPostBody = {
@@ -308,7 +220,7 @@ export type BackfillResponse = {
  * Base info serializer for responses.
  */
 export type BaseInfoResponse = {
-    status: HealthStatus | null;
+    status: string | null;
 };
 
 /**
@@ -341,10 +253,6 @@ export type BulkActionResponse = {
     }>;
 };
 
-export type BulkBody_BulkDAGBody_ = {
-    actions: Array<(BulkCreateAction_BulkDAGBody_ | BulkUpdateAction_BulkDAGBody_ | BulkDeleteAction_BulkDAGBody_)>;
-};
-
 export type BulkBody_BulkDAGRunBody_ = {
     actions: Array<(BulkCreateAction_BulkDAGRunBody_ | BulkUpdateAction_BulkDAGRunBody_ | BulkDeleteAction_BulkDAGRunBody_)>;
 };
@@ -363,18 +271,6 @@ export type BulkBody_PoolBody_ = {
 
 export type BulkBody_VariableBody_ = {
     actions: Array<(BulkCreateAction_VariableBody_ | BulkUpdateAction_VariableBody_ | BulkDeleteAction_VariableBody_)>;
-};
-
-export type BulkCreateAction_BulkDAGBody_ = {
-    /**
-     * The action to be performed on the entities.
-     */
-    action: "create";
-    /**
-     * A list of entities to be created.
-     */
-    entities: Array<BulkDAGBody>;
-    action_on_existence?: BulkActionOnExistence;
 };
 
 export type BulkCreateAction_BulkDAGRunBody_ = {
@@ -438,15 +334,6 @@ export type BulkCreateAction_VariableBody_ = {
 };
 
 /**
- * Request body for bulk update of Dags.
- */
-export type BulkDAGBody = {
-    is_paused?: boolean | null;
-    scheduling_state?: DagSchedulingState | null;
-    dag_id: string;
-};
-
-/**
  * Request body for bulk operations on Dag Runs.
  */
 export type BulkDAGRunBody = {
@@ -484,18 +371,6 @@ export type BulkDAGRunClearBody = {
     run_on_latest_version?: boolean | null;
     note?: string | null;
     dag_runs?: Array<BulkDAGRunBody>;
-};
-
-export type BulkDeleteAction_BulkDAGBody_ = {
-    /**
-     * The action to be performed on the entities.
-     */
-    action: "delete";
-    /**
-     * A list of entity id/key or entity objects to be deleted.
-     */
-    entities: Array<(string | BulkDAGBody)>;
-    action_on_non_existence?: BulkActionNotOnExistence;
 };
 
 export type BulkDeleteAction_BulkDAGRunBody_ = {
@@ -594,22 +469,6 @@ export type BulkTaskInstanceBody = {
     map_index?: number | null;
     dag_id?: string | null;
     dag_run_id?: string | null;
-};
-
-export type BulkUpdateAction_BulkDAGBody_ = {
-    /**
-     * The action to be performed on the entities.
-     */
-    action: "update";
-    /**
-     * A list of entities to be updated.
-     */
-    entities: Array<BulkDAGBody>;
-    /**
-     * A list of field names to update for each entity.Only these fields will be applied from the request body to the database model.Any extra fields provided will be ignored.
-     */
-    update_mask?: Array<(string)> | null;
-    action_on_non_existence?: BulkActionNotOnExistence;
 };
 
 export type BulkUpdateAction_BulkDAGRunBody_ = {
@@ -756,10 +615,6 @@ export type ClearTaskInstancesBody = {
     string,
     number
 ])> | null;
-    /**
-     * Clear every task in this task group. Mutually exclusive with `task_ids`. The group's tasks are resolved on the server from the dag structure, so all of them are targeted regardless of how many there are.
-     */
-    task_group_id?: string | null;
     dag_run_id?: string | null;
     include_upstream?: boolean;
     include_downstream?: boolean;
@@ -770,10 +625,6 @@ export type ClearTaskInstancesBody = {
      */
     run_on_latest_version?: boolean | null;
     prevent_running_task?: boolean;
-    /**
-     * Keep the task state store entries of the cleared task instances so the next attempt resumes from them. By default they are discarded, so the task starts over.
-     */
-    keep_task_state?: boolean;
     note?: string | null;
 };
 
@@ -919,7 +770,6 @@ export type DAGDetailsResponse = {
     dag_id: string;
     dag_display_name: string;
     is_paused: boolean;
-    scheduling_state?: DagSchedulingState;
     is_stale: boolean;
     last_parsed_time: string | null;
     last_parse_duration: number | null;
@@ -927,7 +777,7 @@ export type DAGDetailsResponse = {
     bundle_name: string | null;
     bundle_version: string | null;
     relative_fileloc: string | null;
-    fileloc: string | null;
+    fileloc: string;
     description: string | null;
     timetable_summary: string | null;
     timetable_description: string | null;
@@ -947,7 +797,9 @@ export type DAGDetailsResponse = {
     owners: Array<(string)>;
     catchup: boolean;
     dag_run_timeout: string | null;
-    asset_expression: AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll | null;
+    asset_expression: {
+    [key: string]: unknown;
+} | null;
     doc_md: string | null;
     start_date: string | null;
     end_date: string | null;
@@ -968,7 +820,6 @@ export type DAGDetailsResponse = {
 } | null;
     is_favorite?: boolean;
     active_runs_count?: number;
-    team_name?: string | null;
     /**
      * Whether this Dag's schedule supports backfilling.
      */
@@ -994,8 +845,7 @@ export type DAGDetailsResponse = {
  * Dag Serializer for updatable bodies.
  */
 export type DAGPatchBody = {
-    is_paused?: boolean | null;
-    scheduling_state?: DagSchedulingState | null;
+    is_paused: boolean;
 };
 
 /**
@@ -1005,7 +855,6 @@ export type DAGResponse = {
     dag_id: string;
     dag_display_name: string;
     is_paused: boolean;
-    scheduling_state?: DagSchedulingState;
     is_stale: boolean;
     last_parsed_time: string | null;
     last_parse_duration: number | null;
@@ -1013,7 +862,7 @@ export type DAGResponse = {
     bundle_name: string | null;
     bundle_version: string | null;
     relative_fileloc: string | null;
-    fileloc: string | null;
+    fileloc: string;
     description: string | null;
     timetable_summary: string | null;
     timetable_description: string | null;
@@ -1124,7 +973,6 @@ export type DAGRunResponse = {
     dag_display_name: string;
     partition_key: string | null;
     partition_date: string | null;
-    team_name?: string | null;
 };
 
 /**
@@ -1167,7 +1015,6 @@ export type DAGSourceResponse = {
     dag_id: string;
     version_number: number | null;
     dag_display_name: string;
-    language?: string | null;
 };
 
 /**
@@ -1199,134 +1046,18 @@ export type DAGWarningCollectionResponse = {
  */
 export type DAGWarningResponse = {
     dag_id: string;
-    warning_type: DagWarningType | string;
+    warning_type: DagWarningType;
     message: string;
     timestamp: string;
     dag_display_name: string;
 };
 
 /**
- * Dag bundle collection response.
- */
-export type DagBundleCollectionResponse = {
-    dag_bundles: Array<DagBundleResponse>;
-    total_entries: number;
-};
-
-/**
- * Dag bundle serializer for the single-bundle response.
- */
-export type DagBundleDetailResponse = {
-    name: string;
-    /**
-     * Whether the bundle is still present in this deployment's configuration.
-     */
-    active: boolean | null;
-    /**
-     * The latest version Airflow has seen for the bundle. Null when the bundle does not support versioning, or when no Dag processor has refreshed it successfully yet.
-     */
-    version: string | null;
-    /**
-     * When a Dag processor last successfully refreshed the bundle. It advances even when the version did not change, and a failed refresh leaves it untouched.
-     */
-    last_refreshed: string | null;
-    /**
-     * A link to view the bundle at ``version``, when one is configured and the caller may read Dag versions.
-     */
-    bundle_url: string | null;
-    /**
-     * The team owning the bundle, in a multi-team deployment.
-     */
-    team_name: string | null;
-    /**
-     * Number of Dag import errors recorded against this bundle that the caller is permitted to see, counted on the same terms as ``GET /importErrors``. Null when the caller may not read import errors.
-     */
-    import_error_count: number | null;
-    /**
-     * Number of live Dags recorded against the bundle that the caller is permitted to see, counted on the same terms as ``GET /dags``.
-     */
-    dag_count: number;
-};
-
-/**
- * Dag bundle file collection response.
- */
-export type DagBundleFileCollectionResponse = {
-    dag_bundle_files: Array<DagBundleFileResponse>;
-    total_entries: number;
-};
-
-/**
- * A file in a Dag bundle, as the Dag processor last saw it.
- */
-export type DagBundleFileResponse = {
-    relative_fileloc: string;
-    /**
-     * Number of live Dags the file defines that the caller may read.
-     */
-    dag_count: number;
-    /**
-     * When the file was last parsed, or null if it has never parsed successfully.
-     */
-    last_parsed_time: string | null;
-    /**
-     * How long the last successful parse of the file took, in seconds.
-     */
-    last_parse_duration: number | null;
-    /**
-     * Number of import errors recorded against the file, which is at most one. Null when the caller may not read import errors -- deliberately not zero, which would read as a file with nothing wrong.
-     */
-    import_error_count: number | null;
-};
-
-/**
- * Dag bundle serializer for responses.
- */
-export type DagBundleResponse = {
-    name: string;
-    /**
-     * Whether the bundle is still present in this deployment's configuration.
-     */
-    active: boolean | null;
-    /**
-     * The latest version Airflow has seen for the bundle. Null when the bundle does not support versioning, or when no Dag processor has refreshed it successfully yet.
-     */
-    version: string | null;
-    /**
-     * When a Dag processor last successfully refreshed the bundle. It advances even when the version did not change, and a failed refresh leaves it untouched.
-     */
-    last_refreshed: string | null;
-    /**
-     * A link to view the bundle at ``version``, when one is configured and the caller may read Dag versions.
-     */
-    bundle_url: string | null;
-    /**
-     * The team owning the bundle, in a multi-team deployment.
-     */
-    team_name: string | null;
-    /**
-     * Number of Dag import errors recorded against this bundle that the caller is permitted to see, counted on the same terms as ``GET /importErrors``. Null when the caller may not read import errors.
-     */
-    import_error_count: number | null;
-};
-
-/**
  * DagProcessor info serializer for responses.
  */
 export type DagProcessorInfoResponse = {
-    status: HealthStatus | null;
+    status: string | null;
     latest_dag_processor_heartbeat: string | null;
-    detailed_status: DetailedHealthStatus | null;
-    instances?: Array<DagProcessorInstanceInfoResponse> | null;
-};
-
-/**
- * Dag processor instance info serializer for responses.
- */
-export type DagProcessorInstanceInfoResponse = {
-    hostname: string | null;
-    latest_dag_processor_heartbeat: string | null;
-    bundle_names: Array<(string)> | null;
 };
 
 /**
@@ -1336,7 +1067,7 @@ export type DagRunAssetReference = {
     run_id: string;
     dag_id: string;
     logical_date: string | null;
-    start_date: string | null;
+    start_date: string;
     end_date: string | null;
     state: string;
     data_interval_start: string | null;
@@ -1379,13 +1110,7 @@ export type DagScheduleAssetReference = {
     dag_id: string;
     created_at: string;
     updated_at: string;
-    team_name?: string | null;
 };
-
-/**
- * States controlling whether a Dag can create and schedule work.
- */
-export type DagSchedulingState = 'active' | 'draining' | 'paused';
 
 /**
  * Dag Stats Collection serializer for responses.
@@ -1441,12 +1166,7 @@ export type DagVersionResponse = {
  * This is the set of allowable values for the ``warning_type`` field
  * in the DagWarning model.
  */
-export type DagWarningType = 'asset conflict' | 'duplicate dag id' | 'non-existent pool' | 'runtime varying value';
-
-/**
- * How much of a component's work has a live instance covering it.
- */
-export type DetailedHealthStatus = 'healthy' | 'degraded' | 'down';
+export type DagWarningType = 'asset conflict' | 'non-existent pool' | 'runtime varying value';
 
 /**
  * Backfill collection serializer for responses in dry-run mode.
@@ -1487,11 +1207,9 @@ export type EventLogResponse = {
     event: string;
     logical_date: string | null;
     owner: string | null;
-    owner_display_name: string | null;
     extra: string | null;
     dag_display_name?: string | null;
     task_display_name?: string | null;
-    team_name?: string | null;
 };
 
 /**
@@ -1511,13 +1229,12 @@ export type ExternalViewResponse = {
     url_route?: string | null;
     category?: string | null;
     nav_top_level?: boolean | null;
-    applies_to?: PluginAppliesToResponse | null;
     href: string;
-    destination?: 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'asset' | 'base';
+    destination?: 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'base';
     [key: string]: unknown | string;
 };
 
-export type destination = 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'asset' | 'base';
+export type destination = 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'base';
 
 /**
  * Extra Links Response.
@@ -1648,11 +1365,6 @@ export type HealthInfoResponse = {
 };
 
 /**
- * Aggregate health of a component: whether it has at least one live instance.
- */
-export type HealthStatus = 'healthy' | 'unhealthy';
-
-/**
  * Import Error Collection Response.
  */
 export type ImportErrorCollectionResponse = {
@@ -1667,13 +1379,8 @@ export type ImportErrorResponse = {
     import_error_id: number;
     timestamp: string;
     filename: string;
-    source_reference: string | null;
     bundle_name: string | null;
     stack_trace: string;
-    /**
-     * Return a signed token identifying the file, used to request its reparse.
-     */
-    readonly file_token: string;
 };
 
 /**
@@ -1698,8 +1405,6 @@ export type JobResponse = {
     executor_class: string | null;
     hostname: string | null;
     unixname: string | null;
-    team_names?: Array<(string)>;
-    bundle_names?: Array<(string)> | null;
     dag_display_name?: string | null;
 };
 
@@ -1727,7 +1432,6 @@ export type MaterializeAssetBody = {
 } | null;
     note?: string | null;
     partition_key?: string | null;
-    bundle_version?: string | null;
 };
 
 /**
@@ -1748,17 +1452,6 @@ export type PatchTaskInstanceBody = {
     include_downstream?: boolean;
     include_future?: boolean;
     include_past?: boolean;
-};
-
-/**
- * Serializer for the optional Dag/task scoping criteria of a UI plugin.
- */
-export type PluginAppliesToResponse = {
-    dag_tags?: Array<(string)> | null;
-    dag_ids?: Array<(string)> | null;
-    task_ids?: Array<(string)> | null;
-    operators?: Array<(string)> | null;
-    operator_names?: Array<(string)> | null;
 };
 
 /**
@@ -1790,7 +1483,6 @@ export type PluginImportErrorResponse = {
  */
 export type PluginResponse = {
     name: string;
-    team_name?: string | null;
     macros: Array<(string)>;
     flask_blueprints: Array<(string)>;
     fastapi_apps: Array<FastAPIAppResponse>;
@@ -1911,13 +1603,12 @@ export type ReactAppResponse = {
     url_route?: string | null;
     category?: string | null;
     nav_top_level?: boolean | null;
-    applies_to?: PluginAppliesToResponse | null;
     bundle_url: string;
-    destination?: 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'asset' | 'base' | 'dashboard' | 'dag_overview' | 'task_overview';
+    destination?: 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'base' | 'dashboard';
     [key: string]: unknown | string;
 };
 
-export type destination2 = 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'asset' | 'base' | 'dashboard' | 'dag_overview' | 'task_overview';
+export type destination2 = 'nav' | 'dag' | 'dag_run' | 'task' | 'task_instance' | 'base' | 'dashboard';
 
 /**
  * Internal enum for setting reprocess behavior in a backfill.
@@ -1930,17 +1621,7 @@ export type ReprocessBehavior = 'failed' | 'completed' | 'none';
  * Scheduler info serializer for responses.
  */
 export type SchedulerInfoResponse = {
-    status: HealthStatus | null;
-    latest_scheduler_heartbeat: string | null;
-    detailed_status: DetailedHealthStatus | null;
-    instances?: Array<SchedulerInstanceInfoResponse> | null;
-};
-
-/**
- * Scheduler instance info serializer for responses.
- */
-export type SchedulerInstanceInfoResponse = {
-    hostname: string | null;
+    status: string | null;
     latest_scheduler_heartbeat: string | null;
 };
 
@@ -2054,10 +1735,6 @@ export type TaskInstanceHistoryResponse = {
     executor: string | null;
     executor_config: string;
     dag_version: DagVersionResponse | null;
-    /**
-     * The reason the task instance reached its current state, as recorded by a retry policy. May describe a previous attempt: it is cleared only when the task next starts running, so a task waiting to be retried or re-run can still carry the reason its last attempt ended.
-     */
-    state_reason?: string | null;
 };
 
 /**
@@ -2100,11 +1777,6 @@ export type TaskInstanceResponse = {
     trigger: TriggerResponse | null;
     triggerer_job: JobResponse | null;
     dag_version: DagVersionResponse | null;
-    team_name?: string | null;
-    /**
-     * The reason the task instance reached its current state, as recorded by a retry policy. May describe a previous attempt: it is cleared only when the task next starts running, so a task waiting to be retried or re-run can still carry the reason its last attempt ended.
-     */
-    state_reason?: string | null;
 };
 
 /**
@@ -2166,7 +1838,6 @@ export type TaskOutletAssetReference = {
     task_id: string;
     created_at: string;
     updated_at: string;
-    team_name?: string | null;
 };
 
 /**
@@ -2272,7 +1943,6 @@ export type TriggerDAGRunPostBody = {
 } | null;
     note?: string | null;
     partition_key?: string | null;
-    bundle_version?: string | null;
 };
 
 /**
@@ -2294,19 +1964,8 @@ export type TriggerResponse = {
  * Triggerer info serializer for responses.
  */
 export type TriggererInfoResponse = {
-    status: HealthStatus | null;
+    status: string | null;
     latest_triggerer_heartbeat: string | null;
-    detailed_status: DetailedHealthStatus | null;
-    instances?: Array<TriggererInstanceInfoResponse> | null;
-};
-
-/**
- * Triggerer instance info serializer for responses.
- */
-export type TriggererInstanceInfoResponse = {
-    hostname: string | null;
-    latest_triggerer_heartbeat: string | null;
-    team_names: Array<(string)>;
 };
 
 /**
@@ -2397,7 +2056,6 @@ export type XComResponse = {
     dag_display_name: string;
     task_display_name: string;
     run_after: string;
-    team_name?: string | null;
 };
 
 /**
@@ -2414,7 +2072,6 @@ export type XComResponseNative = {
     dag_display_name: string;
     task_display_name: string;
     run_after: string;
-    team_name?: string | null;
     value: unknown;
 };
 
@@ -2432,7 +2089,6 @@ export type XComResponseString = {
     dag_display_name: string;
     task_display_name: string;
     run_after: string;
-    team_name?: string | null;
     value: string | null;
 };
 
@@ -2450,10 +2106,6 @@ export type XComUpdateBody = {
 export type AuthenticatedMeResponse = {
     id: string;
     username: string;
-    /**
-     * Teams the user has access to. Null when the environment does not run in multi-team mode.
-     */
-    teams?: Array<(string)> | null;
 };
 
 /**
@@ -2480,27 +2132,9 @@ export type BaseNodeResponse = {
     label: string;
     type: 'join' | 'task' | 'asset-condition' | 'asset' | 'asset-alias' | 'asset-name-ref' | 'asset-uri-ref' | 'dag' | 'sensor' | 'trigger';
     team?: string | null;
-    asset_condition_type?: 'or-gate' | 'and-gate' | null;
 };
 
 export type type = 'join' | 'task' | 'asset-condition' | 'asset' | 'asset-alias' | 'asset-name-ref' | 'asset-uri-ref' | 'dag' | 'sensor' | 'trigger';
-
-/**
- * Response model for calendar deadline aggregation results.
- */
-export type CalendarDeadlineCollectionResponse = {
-    total_entries: number;
-    deadlines: Array<CalendarDeadlineResponse>;
-};
-
-/**
- * Represents aggregated deadline counts for a specific calendar time bucket.
- */
-export type CalendarDeadlineResponse = {
-    date: string;
-    missed: boolean;
-    count: number;
-};
 
 /**
  * Response model for calendar time range results.
@@ -2592,16 +2226,6 @@ export type DAGRunLightResponse = {
 };
 
 /**
- * Per-Dag counts of DagRuns grouped by state.
- */
-export type DAGRunStateCountsResponse = {
-    dag_id: string;
-    state_counts: {
-        [key: string]: (number);
-    };
-};
-
-/**
  * DAG Run States for responses.
  */
 export type DAGRunStates = {
@@ -2626,7 +2250,6 @@ export type DAGWithLatestDagRunsResponse = {
     dag_id: string;
     dag_display_name: string;
     is_paused: boolean;
-    scheduling_state?: DagSchedulingState;
     is_stale: boolean;
     last_parsed_time: string | null;
     last_parse_duration: number | null;
@@ -2634,7 +2257,7 @@ export type DAGWithLatestDagRunsResponse = {
     bundle_name: string | null;
     bundle_version: string | null;
     relative_fileloc: string | null;
-    fileloc: string | null;
+    fileloc: string;
     description: string | null;
     timetable_summary: string | null;
     timetable_description: string | null;
@@ -2652,12 +2275,12 @@ export type DAGWithLatestDagRunsResponse = {
     next_dagrun_run_after: string | null;
     allowed_run_types: Array<DagRunType> | null;
     owners: Array<(string)>;
-    asset_expression: AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll | null;
+    asset_expression: {
+    [key: string]: unknown;
+} | null;
     latest_dag_runs: Array<DAGRunLightResponse>;
-    has_unfinished_runs: boolean;
     pending_actions: Array<HITLDetail>;
     is_favorite: boolean;
-    team_name?: string | null;
     /**
      * Whether this Dag's schedule supports backfilling.
      */
@@ -2669,26 +2292,10 @@ export type DAGWithLatestDagRunsResponse = {
 };
 
 /**
- * Collection of per-Dag DagRun-state counts for the Dag list page.
- */
-export type DAGsRunStateCountsCollectionResponse = {
-    dags: Array<DAGRunStateCountsResponse>;
-    state_count_limit: number;
-};
-
-/**
  * DAG Run statistics serializer for responses.
  */
 export type DagRunStatsResponse = {
     duration: DurationStats | null;
-};
-
-/**
- * Timetable types used by Dags.
- */
-export type DagTimetableTypeCollectionResponse = {
-    timetable_types: Array<(string)>;
-    total_entries: number;
 };
 
 /**
@@ -2743,7 +2350,6 @@ export type DeadlineResponse = {
     dag_run_id: string;
     alert_id?: string | null;
     alert_name?: string | null;
-    team_name?: string | null;
 };
 
 /**
@@ -2766,6 +2372,7 @@ export type EdgeResponse = {
     target_id: string;
     is_setup_teardown?: boolean | null;
     label?: string | null;
+    is_source_asset?: boolean | null;
 };
 
 /**
@@ -2885,7 +2492,7 @@ export type LightGridTaskInstanceSummary = {
 /**
  * Define all menu items defined in the menu.
  */
-export type MenuItem = 'Required Actions' | 'Assets' | 'Audit Log' | 'Config' | 'Connections' | 'Dags' | 'Dag Bundles' | 'Deadlines' | 'Docs' | 'Jobs' | 'Plugins' | 'Pools' | 'Providers' | 'Variables' | 'XComs';
+export type MenuItem = 'Required Actions' | 'Assets' | 'Audit Log' | 'Config' | 'Connections' | 'Dags' | 'Deadlines' | 'Docs' | 'Jobs' | 'Plugins' | 'Pools' | 'Providers' | 'Variables' | 'XComs';
 
 /**
  * Menu Item Collection serializer for responses.
@@ -2916,7 +2523,9 @@ export type NextRunAssetEventResponse = {
  * Response for the ``next_run_assets`` endpoint.
  */
 export type NextRunAssetsResponse = {
-    asset_expression?: AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll | null;
+    asset_expression?: {
+    [key: string]: unknown;
+} | null;
     events: Array<NextRunAssetEventResponse>;
     pending_partition_count?: number | null;
 };
@@ -2929,14 +2538,12 @@ export type NodeResponse = {
     label: string;
     type: 'join' | 'task' | 'asset-condition' | 'asset' | 'asset-alias' | 'asset-name-ref' | 'asset-uri-ref' | 'dag' | 'sensor' | 'trigger';
     team?: string | null;
-    asset_condition_type?: 'or-gate' | 'and-gate' | null;
     children?: Array<NodeResponse> | null;
     is_mapped?: boolean | null;
     tooltip?: string | null;
     setup_teardown_type?: 'setup' | 'teardown' | null;
     operator?: string | null;
-    ui_color?: string | null;
-    ui_fgcolor?: string | null;
+    asset_condition_type?: 'or-gate' | 'and-gate' | null;
 };
 
 export type OklchColor = string;
@@ -2965,7 +2572,9 @@ export type PartitionedDagRunCollectionResponse = {
     partitioned_dag_runs: Array<PartitionedDagRunResponse>;
     total: number;
     asset_expressions?: {
-    [key: string]: (AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll | null);
+    [key: string]: ({
+    [key: string]: unknown;
+} | null);
 } | null;
 };
 
@@ -2982,7 +2591,9 @@ export type PartitionedDagRunDetailResponse = {
     assets: Array<PartitionedDagRunAssetResponse>;
     total_required: number;
     total_received: number;
-    asset_expression?: AssetExpressionAsset | AssetExpressionAlias | AssetExpressionRef | AssetExpressionAny | AssetExpressionAll | null;
+    asset_expression?: {
+    [key: string]: unknown;
+} | null;
 };
 
 /**
@@ -3125,10 +2736,6 @@ export type GetAssetsData = {
      */
     orderBy?: Array<(string)>;
     /**
-     * Exact-match filter on the full asset URI. Compiles to an indexed equality comparison (``uri = ...``). Repeat the parameter (``?uri=a&uri=b``) to match multiple assets.
-     */
-    uri?: Array<(string)>;
-    /**
      * Case-insensitive substring match (SQL `ILIKE`). Slower than `uri_prefix_pattern` on large tables — see "Filtering with pattern parameters".
      */
     uriPattern?: string | null;
@@ -3167,10 +2774,6 @@ export type GetAssetAliasResponse = unknown;
 
 export type GetAssetEventsData = {
     assetId?: number | null;
-    /**
-     * Filter by JSON key-value pairs. Repeat for multiple conditions (AND logic). Format: key=value (e.g. extra=region=us&extra=env=prod).
-     */
-    extra?: Array<(string)>;
     limit?: number;
     /**
      * Case-insensitive substring match (SQL `ILIKE`). Slower than `name_prefix_pattern` on large tables — see "Filtering with pattern parameters".
@@ -3185,11 +2788,6 @@ export type GetAssetEventsData = {
      * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `source_task_id, source_dag_id, source_run_id, source_map_index, timestamp`
      */
     orderBy?: Array<(string)>;
-    partitionKey?: string | null;
-    /**
-     * Filter results by matching this regular expression against the field value.
-     */
-    partitionKeyRegexpPattern?: string | null;
     sourceDagId?: string | null;
     sourceMapIndex?: number | null;
     sourceRunId?: string | null;
@@ -3210,7 +2808,7 @@ export type CreateAssetEventResponse = AssetEventResponse;
 
 export type MaterializeAssetData = {
     assetId: number;
-    requestBody: MaterializeAssetBody;
+    requestBody?: MaterializeAssetBody | null;
 };
 
 export type MaterializeAssetResponse = DAGRunResponse;
@@ -3265,51 +2863,6 @@ export type DeleteDagAssetQueuedEventData = {
 
 export type DeleteDagAssetQueuedEventResponse = void;
 
-export type GetAssetsUiData = {
-    dagIds?: Array<(string)>;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `group_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    groupPattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    groupPrefixPattern?: string | null;
-    lastAssetEventTimestampGt?: string | null;
-    lastAssetEventTimestampGte?: string | null;
-    lastAssetEventTimestampLt?: string | null;
-    lastAssetEventTimestampLte?: string | null;
-    limit?: number;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `name_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    namePattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    namePrefixPattern?: string | null;
-    offset?: number;
-    onlyActive?: boolean;
-    /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, name, uri, group, created_at, updated_at, last_asset_event_timestamp`
-     */
-    orderBy?: Array<(string)>;
-    /**
-     * Exact-match filter on the full asset URI. Compiles to an indexed equality comparison (``uri = ...``). Repeat the parameter (``?uri=a&uri=b``) to match multiple assets.
-     */
-    uri?: Array<(string)>;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `uri_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    uriPattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    uriPrefixPattern?: string | null;
-};
-
-export type GetAssetsUiResponse = AssetCollectionResponse;
-
 export type NextRunAssetsData = {
     dagId: string;
 };
@@ -3340,18 +2893,6 @@ export type GetBackfillData = {
 
 export type GetBackfillResponse = BackfillResponse;
 
-export type ListBackfillDagRunsData = {
-    backfillId: number;
-    limit?: number;
-    offset?: number;
-    /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, sort_ordinal`
-     */
-    orderBy?: Array<(string)>;
-};
-
-export type ListBackfillDagRunsResponse = BackfillDagRunCollectionResponse;
-
 export type PauseBackfillData = {
     backfillId: number;
 };
@@ -3378,34 +2919,13 @@ export type CreateBackfillDryRunResponse = DryRunBackfillCollectionResponse;
 
 export type ListBackfillsUiData = {
     active?: boolean | null;
-    completedAtGt?: string | null;
-    completedAtGte?: string | null;
-    completedAtLt?: string | null;
-    completedAtLte?: string | null;
-    createdAtGt?: string | null;
-    createdAtGte?: string | null;
-    createdAtLt?: string | null;
-    createdAtLte?: string | null;
     dagId?: string | null;
-    fromDateGt?: string | null;
-    fromDateGte?: string | null;
-    fromDateLt?: string | null;
-    fromDateLte?: string | null;
     limit?: number;
-    maxActiveRunsGt?: number | null;
-    maxActiveRunsGte?: number | null;
-    maxActiveRunsLt?: number | null;
-    maxActiveRunsLte?: number | null;
     offset?: number;
     /**
      * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id`
      */
     orderBy?: Array<(string)>;
-    reprocessBehavior?: ReprocessBehavior | null;
-    toDateGt?: string | null;
-    toDateGte?: string | null;
-    toDateLt?: string | null;
-    toDateLte?: string | null;
 };
 
 export type ListBackfillsUiResponse = BackfillCollectionResponse;
@@ -3586,7 +3106,6 @@ export type GetDagRunsData = {
     startDateLt?: string | null;
     startDateLte?: string | null;
     state?: Array<(string)>;
-    teams?: Array<(string)>;
     /**
      * Case-insensitive substring match (SQL `ILIKE`). Slower than `triggering_user_name_prefix_pattern` on large tables — see "Filtering with pattern parameters".
      */
@@ -3676,31 +3195,6 @@ export type GetDagSourceData = {
 
 export type GetDagSourceResponse = DAGSourceResponse;
 
-export type GetDagBundlesData = {
-    limit?: number;
-    offset?: number;
-    /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `name, version, last_refreshed, active`
-     */
-    orderBy?: Array<(string)>;
-};
-
-export type GetDagBundlesResponse = DagBundleCollectionResponse;
-
-export type GetDagBundleData = {
-    bundleName: string;
-};
-
-export type GetDagBundleResponse = DagBundleDetailResponse;
-
-export type GetDagBundleFilesData = {
-    bundleName: string;
-    limit?: number;
-    offset?: number;
-};
-
-export type GetDagBundleFilesResponse = DagBundleFileCollectionResponse;
-
 export type GetDagStatsData = {
     dagIds?: Array<(string)>;
 };
@@ -3732,7 +3226,7 @@ export type ListDagWarningsData = {
      * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `dag_id, warning_type, message, timestamp`
      */
     orderBy?: Array<(string)>;
-    warningType?: DagWarningType | string | null;
+    warningType?: DagWarningType | null;
 };
 
 export type ListDagWarningsResponse = DAGWarningCollectionResponse;
@@ -3779,10 +3273,6 @@ export type GetDagsData = {
      */
     hasImportErrors?: boolean | null;
     isFavorite?: boolean | null;
-    /**
-     * Filter Dags by whether their timetable can create scheduled runs.
-     */
-    isScheduled?: boolean | null;
     lastDagRunState?: DagRunState | null;
     limit?: number;
     offset?: number;
@@ -3846,12 +3336,6 @@ export type GetDagDetailsData = {
 };
 
 export type GetDagDetailsResponse = DAGDetailsResponse;
-
-export type BulkDagsData = {
-    requestBody: BulkBody_BulkDAGBody_;
-};
-
-export type BulkDagsResponse = BulkResponse;
 
 export type FavoriteDagData = {
     dagId: string;
@@ -3928,42 +3412,22 @@ export type GetDagsUiData = {
     limit?: number;
     offset?: number;
     /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `dag_id, dag_display_name, next_dagrun, state, start_date, last_run_state, last_run_start_date, last_run_run_after`
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `dag_id, dag_display_name, next_dagrun, state, start_date, last_run_state, last_run_start_date`
      */
     orderBy?: Array<(string)>;
     owners?: Array<(string)>;
     paused?: boolean | null;
-    schedulingState?: DagSchedulingState | null;
     tags?: Array<(string)>;
     tagsMatchMode?: 'any' | 'all' | null;
-    teams?: Array<(string)>;
-    timetableType?: Array<(string)>;
 };
 
 export type GetDagsUiResponse = DAGWithLatestDagRunsCollectionResponse;
-
-export type GetDagTimetableTypesUiData = {
-    limit?: number;
-    offset?: number;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    timetableTypePrefixPattern?: string | null;
-};
-
-export type GetDagTimetableTypesUiResponse = DagTimetableTypeCollectionResponse;
 
 export type GetLatestRunInfoData = {
     dagId: string;
 };
 
 export type GetLatestRunInfoResponse = DAGRunLightResponse | null;
-
-export type GetDagRunStateCountsUiData = {
-    dagIds: Array<(string)>;
-};
-
-export type GetDagRunStateCountsUiResponse = DAGsRunStateCountsCollectionResponse;
 
 export type GetEventLogData = {
     eventLogId: number;
@@ -3998,18 +3462,10 @@ export type GetEventLogsData = {
     mapIndex?: number | null;
     offset?: number;
     /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, dttm, dag_id, task_id, run_id, event, logical_date, owner, owner_display_name, extra, when, event_log_id`
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, dttm, dag_id, task_id, run_id, event, logical_date, owner, extra, when, event_log_id`
      */
     orderBy?: Array<(string)>;
     owner?: string | null;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `owner_display_name_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    ownerDisplayNamePattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    ownerDisplayNamePrefixPattern?: string | null;
     /**
      * Case-insensitive substring match (SQL `ILIKE`). Slower than `owner_prefix_pattern` on large tables — see "Filtering with pattern parameters".
      */
@@ -4036,7 +3492,6 @@ export type GetEventLogsData = {
      * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
      */
     taskIdPrefixPattern?: string | null;
-    teams?: Array<(string)>;
     tryNumber?: number | null;
 };
 
@@ -4314,7 +3769,6 @@ export type GetTaskInstancesData = {
      */
     taskGroupId?: string | null;
     taskId?: string | null;
-    teams?: Array<(string)>;
     tryNumber?: Array<(number)>;
     updatedAtGt?: string | null;
     updatedAtGte?: string | null;
@@ -4504,7 +3958,6 @@ export type GetHitlDetailsData = {
      * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
      */
     taskIdPrefixPattern?: string | null;
-    teams?: Array<(string)>;
 };
 
 export type GetHitlDetailsResponse = HITLDetailCollection;
@@ -4535,7 +3988,7 @@ export type GetImportErrorsData = {
     limit?: number;
     offset?: number;
     /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, timestamp, filename, source_reference, bundle_name, stacktrace, import_error_id`
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, timestamp, filename, bundle_name, stacktrace, import_error_id`
      */
     orderBy?: Array<(string)>;
 };
@@ -4543,7 +3996,6 @@ export type GetImportErrorsData = {
 export type GetImportErrorsResponse = ImportErrorCollectionResponse;
 
 export type GetJobsData = {
-    dagId?: string | null;
     endDateGt?: string | null;
     endDateGte?: string | null;
     endDateLt?: string | null;
@@ -4563,7 +4015,6 @@ export type GetJobsData = {
     startDateGte?: string | null;
     startDateLt?: string | null;
     startDateLte?: string | null;
-    teams?: Array<(string)>;
 };
 
 export type GetJobsResponse = JobCollectionResponse;
@@ -4810,7 +4261,6 @@ export type GetXcomEntriesData = {
      * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
      */
     taskIdPrefixPattern?: string | null;
-    teams?: Array<(string)>;
     xcomKey?: string | null;
     /**
      * Case-insensitive substring match (SQL `ILIKE`). Slower than `xcom_key_prefix_pattern` on large tables — see "Filtering with pattern parameters".
@@ -4951,8 +4401,6 @@ export type GenerateTokenResponse2 = GenerateTokenResponse;
 export type GetPartitionedDagRunsData = {
     dagId?: string | null;
     hasCreatedDagRunId?: boolean | null;
-    limit?: number;
-    offset?: number;
 };
 
 export type GetPartitionedDagRunsResponse = PartitionedDagRunCollectionResponse;
@@ -4998,7 +4446,6 @@ export type GetDeadlinesData = {
      * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, deadline_time, created_at, last_updated_at, missed, dag_id, dag_run_id, alert_name`
      */
     orderBy?: Array<(string)>;
-    teams?: Array<(string)>;
 };
 
 export type GetDeadlinesResponse = DeadlineCollectionResponse;
@@ -5019,6 +4466,7 @@ export type GetDagDeadlineAlertsResponse = DeadlineAlertCollectionResponse;
 export type StructureDataData = {
     dagId: string;
     depth?: number | null;
+    externalDependencies?: boolean;
     includeDownstream?: boolean;
     includeUpstream?: boolean;
     root?: string | null;
@@ -5043,14 +4491,6 @@ export type GetDagStructureData = {
     runAfterGte?: string | null;
     runAfterLt?: string | null;
     runAfterLte?: string | null;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `run_id_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    runIdPattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    runIdPrefixPattern?: string | null;
     runType?: Array<(string)>;
     state?: Array<(string)>;
     /**
@@ -5077,14 +4517,6 @@ export type GetGridRunsData = {
     runAfterGte?: string | null;
     runAfterLt?: string | null;
     runAfterLte?: string | null;
-    /**
-     * Case-insensitive substring match (SQL `ILIKE`). Slower than `run_id_prefix_pattern` on large tables — see "Filtering with pattern parameters".
-     */
-    runIdPattern?: string | null;
-    /**
-     * Case-sensitive, index-friendly prefix match. See "Filtering with pattern parameters".
-     */
-    runIdPrefixPattern?: string | null;
     runType?: Array<(string)>;
     state?: Array<(string)>;
     /**
@@ -5127,17 +4559,6 @@ export type GetCalendarData = {
 };
 
 export type GetCalendarResponse = CalendarTimeRangeCollectionResponse;
-
-export type GetCalendarDeadlinesData = {
-    dagId: string;
-    deadlineTimeGt?: string | null;
-    deadlineTimeGte?: string | null;
-    deadlineTimeLt?: string | null;
-    deadlineTimeLte?: string | null;
-    granularity?: 'hourly' | 'daily';
-};
-
-export type GetCalendarDeadlinesResponse = CalendarDeadlineCollectionResponse;
 
 export type ListTeamsData = {
     limit?: number;
@@ -5502,21 +4923,6 @@ export type $OpenApiTs = {
             };
         };
     };
-    '/ui/assets': {
-        get: {
-            req: GetAssetsUiData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: AssetCollectionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
     '/ui/next_run_assets/{dag_id}': {
         get: {
             req: NextRunAssetsData;
@@ -5600,33 +5006,6 @@ export type $OpenApiTs = {
                  * Successful Response
                  */
                 200: BackfillResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Not Found
-                 */
-                404: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/api/v2/backfills/{backfill_id}/dag_runs': {
-        get: {
-            req: ListBackfillDagRunsData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: BackfillDagRunCollectionResponse;
                 /**
                  * Unauthorized
                  */
@@ -6452,83 +5831,6 @@ export type $OpenApiTs = {
             };
         };
     };
-    '/api/v2/dagBundles': {
-        get: {
-            req: GetDagBundlesData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: DagBundleCollectionResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/api/v2/dagBundles/{bundle_name}': {
-        get: {
-            req: GetDagBundleData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: DagBundleDetailResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Not Found
-                 */
-                404: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/api/v2/dagBundles/{bundle_name}/files': {
-        get: {
-            req: GetDagBundleFilesData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: DagBundleFileCollectionResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Not Found
-                 */
-                404: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
     '/api/v2/dagStats': {
         get: {
             req: GetDagStatsData;
@@ -6835,29 +6137,6 @@ export type $OpenApiTs = {
             };
         };
     };
-    '/api/v2/dags/bulk': {
-        patch: {
-            req: BulkDagsData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: BulkResponse;
-                /**
-                 * Unauthorized
-                 */
-                401: HTTPExceptionResponse;
-                /**
-                 * Forbidden
-                 */
-                403: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
     '/api/v2/dags/{dag_id}/favorite': {
         post: {
             req: FavoriteDagData;
@@ -6878,10 +6157,6 @@ export type $OpenApiTs = {
                  * Not Found
                  */
                 404: HTTPExceptionResponse;
-                /**
-                 * Conflict
-                 */
-                409: HTTPExceptionResponse;
                 /**
                  * Validation Error
                  */
@@ -6958,21 +6233,6 @@ export type $OpenApiTs = {
             };
         };
     };
-    '/ui/dags/timetable_types': {
-        get: {
-            req: GetDagTimetableTypesUiData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: DagTimetableTypeCollectionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
     '/ui/dags/{dag_id}/latest_run': {
         get: {
             req: GetLatestRunInfoData;
@@ -6989,21 +6249,6 @@ export type $OpenApiTs = {
                  * Not Found
                  */
                 404: HTTPExceptionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/ui/dags/run_state_counts': {
-        get: {
-            req: GetDagRunStateCountsUiData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: DAGsRunStateCountsCollectionResponse;
                 /**
                  * Validation Error
                  */
@@ -9081,6 +8326,10 @@ export type $OpenApiTs = {
                  */
                 200: StructureDataResponse;
                 /**
+                 * Bad Request
+                 */
+                400: HTTPExceptionResponse;
+                /**
                  * Not Found
                  */
                 404: HTTPExceptionResponse;
@@ -9187,21 +8436,6 @@ export type $OpenApiTs = {
                  * Successful Response
                  */
                 200: CalendarTimeRangeCollectionResponse;
-                /**
-                 * Validation Error
-                 */
-                422: HTTPValidationError;
-            };
-        };
-    };
-    '/ui/calendar/{dag_id}/deadlines': {
-        get: {
-            req: GetCalendarDeadlinesData;
-            res: {
-                /**
-                 * Successful Response
-                 */
-                200: CalendarDeadlineCollectionResponse;
                 /**
                  * Validation Error
                  */

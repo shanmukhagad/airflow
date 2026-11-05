@@ -72,20 +72,6 @@ paths:
           title: Name Prefix Pattern
         description: Case-sensitive, index-friendly prefix match. See "Filtering with
           pattern parameters".
-      - name: uri
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          description: Exact-match filter on the full asset URI. Compiles to an indexed
-            equality comparison (``uri = ...``). Repeat the parameter (``?uri=a&uri=b``)
-            to match multiple assets.
-          title: Uri
-        description: Exact-match filter on the full asset URI. Compiles to an indexed
-          equality comparison (``uri = ...``). Repeat the parameter (``?uri=a&uri=b``)
-          to match multiple assets.
       - name: uri_pattern
         in: query
         required: false
@@ -414,26 +400,6 @@ paths:
           - type: integer
           - type: 'null'
           title: Source Map Index
-      - name: partition_key
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Partition Key
-      - name: partition_key_regexp_pattern
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Filter results by matching this regular expression against
-            the field value.
-          title: Partition Key Regexp Pattern
-        description: Filter results by matching this regular expression against the
-          field value.
       - name: name_pattern
         in: query
         required: false
@@ -460,18 +426,6 @@ paths:
           title: Name Prefix Pattern
         description: Case-sensitive, index-friendly prefix match. See "Filtering with
           pattern parameters".
-      - name: extra
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          description: 'Filter by JSON key-value pairs. Repeat for multiple conditions
-            (AND logic). Format: key=value (e.g. extra=region=us&extra=env=prod).'
-          title: Extra
-        description: 'Filter by JSON key-value pairs. Repeat for multiple conditions
-          (AND logic). Format: key=value (e.g. extra=region=us&extra=env=prod).'
       - name: timestamp_gte
         in: query
         required: false
@@ -603,11 +557,13 @@ paths:
           type: integer
           title: Asset Id
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MaterializeAssetBody'
+              anyOf:
+              - $ref: '#/components/schemas/MaterializeAssetBody'
+              - type: 'null'
+              title: Body
       responses:
         '200':
           description: Successful Response
@@ -1189,85 +1145,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BackfillResponse'
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Unauthorized
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Forbidden
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v2/backfills/{backfill_id}/dag_runs:
-    get:
-      tags:
-      - Backfill
-      summary: List Backfill Dag Runs
-      description: List Dag runs associated with a backfill, including skipped slots.
-      operationId: list_backfill_dag_runs
-      security:
-      - OAuth2PasswordBearer: []
-      - HTTPBearer: []
-      parameters:
-      - name: backfill_id
-        in: path
-        required: true
-        schema:
-          type: integer
-          minimum: 0
-          title: Backfill Id
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 50
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      - name: order_by
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          description: 'Attributes to order by, multi criteria sort is supported.
-            Prefix with `-` for descending order. Supported attributes: `id, sort_ordinal`'
-          default:
-          - sort_ordinal
-          title: Order By
-        description: 'Attributes to order by, multi criteria sort is supported. Prefix
-          with `-` for descending order. Supported attributes: `id, sort_ordinal`'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BackfillDagRunCollectionResponse'
         '401':
           content:
             application/json:
@@ -2623,14 +2500,6 @@ paths:
           - type: string
           - type: 'null'
           title: Bundle Version
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       - name: order_by
         in: query
         required: false
@@ -3337,242 +3206,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v2/dagBundles:
-    get:
-      tags:
-      - Dag Bundle
-      summary: Get Dag Bundles
-      description: 'List the Dag bundles Airflow knows about.
-
-
-        Reports the version of each bundle Airflow currently holds and when a Dag
-        processor last
-
-        refreshed it, so whoever deployed the code can tell whether it has been picked
-        up yet.
-
-
-        A bundle is visible to a user who can read at least one Dag recorded against
-        it. A bundle
-
-        holding no registered Dag at all has nothing to authorize against, so it is
-        listed only for a
-
-        user holding the admin-by-default ``AccessView.IMPORT_ERRORS_ALL`` for that
-        bundle''s team --
-
-        the same view, scoped the same way, that governs import errors for a file
-        that never
-
-        registered a Dag.'
-      operationId: get_dag_bundles
-      security:
-      - OAuth2PasswordBearer: []
-      - HTTPBearer: []
-      parameters:
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 50
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      - name: order_by
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          description: 'Attributes to order by, multi criteria sort is supported.
-            Prefix with `-` for descending order. Supported attributes: `name, version,
-            last_refreshed, active`'
-          default:
-          - name
-          title: Order By
-        description: 'Attributes to order by, multi criteria sort is supported. Prefix
-          with `-` for descending order. Supported attributes: `name, version, last_refreshed,
-          active`'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DagBundleCollectionResponse'
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Unauthorized
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Forbidden
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v2/dagBundles/{bundle_name}:
-    get:
-      tags:
-      - Dag Bundle
-      summary: Get Dag Bundle
-      description: Get a Dag bundle.
-      operationId: get_dag_bundle
-      security:
-      - OAuth2PasswordBearer: []
-      - HTTPBearer: []
-      parameters:
-      - name: bundle_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Bundle Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DagBundleDetailResponse'
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Unauthorized
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Forbidden
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/v2/dagBundles/{bundle_name}/files:
-    get:
-      tags:
-      - Dag Bundle
-      summary: Get Dag Bundle Files
-      description: 'List the files in a Dag bundle, ordered by path.
-
-
-        A file is listed when the caller can read at least one Dag it defines. A file
-        that recorded an
-
-        import error without registering any Dag is listed too, on the same admin-by-default
-        terms as
-
-        ``GET /importErrors`` -- a file that fails before defining a Dag has no Dag
-        to authorize on,
-
-        and it is the case this page most needs to show.
-
-
-        ``dag_count`` counts live Dags only. Dag rows are never deleted: a file that
-        fails to import
-
-        has every Dag in it marked stale, and so does a file dropped from the bundle.
-        A file therefore
-
-        stays listed on the strength of a live Dag *or* an import error, so a file
-        that has just broken
-
-        does not vanish from the page someone opened to find out why, while a file
-        deleted long ago
-
-        drops out instead of lingering forever.
-
-
-        Parse times come from the Dags in the file rather than the file itself, which
-        is the only
-
-        record Airflow keeps: a file whose every Dag was removed keeps no parse time
-        of its own.'
-      operationId: get_dag_bundle_files
-      security:
-      - OAuth2PasswordBearer: []
-      - HTTPBearer: []
-      parameters:
-      - name: bundle_name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Bundle Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 50
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DagBundleFileCollectionResponse'
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Unauthorized
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Forbidden
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /api/v2/dagStats:
     get:
       tags:
@@ -3817,9 +3450,6 @@ paths:
         schema:
           anyOf:
           - $ref: '#/components/schemas/DagWarningType'
-          - type: string
-            maxLength: 50
-            pattern: ^[a-z][a-z0-9_]*:[a-z0-9_.\-]+$
           - type: 'null'
           title: Warning Type
       - name: limit
@@ -3890,17 +3520,6 @@ paths:
       - OAuth2PasswordBearer: []
       - HTTPBearer: []
       parameters:
-      - name: is_scheduled
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          description: Filter Dags by whether their timetable can create scheduled
-            runs.
-          title: Is Scheduled
-        description: Filter Dags by whether their timetable can create scheduled runs.
       - name: limit
         in: query
         required: false
@@ -4595,47 +4214,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v2/dags/bulk:
-    patch:
-      tags:
-      - DAG
-      summary: Bulk Dags
-      description: Bulk pause, resume, or drain Dags by id.
-      operationId: bulk_dags
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BulkBody_BulkDAGBody_'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkResponse'
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-        '403':
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-      security:
-      - OAuth2PasswordBearer: []
-      - HTTPBearer: []
   /api/v2/dags/{dag_id}/favorite:
     post:
       tags:
@@ -4674,12 +4252,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPExceptionResponse'
           description: Not Found
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPExceptionResponse'
-          description: Conflict
         '422':
           description: Validation Error
           content:
@@ -4819,15 +4391,13 @@ paths:
             type: string
           description: 'Attributes to order by, multi criteria sort is supported.
             Prefix with `-` for descending order. Supported attributes: `id, dttm,
-            dag_id, task_id, run_id, event, logical_date, owner, owner_display_name,
-            extra, when, event_log_id`'
+            dag_id, task_id, run_id, event, logical_date, owner, extra, when, event_log_id`'
           default:
           - id
           title: Order By
         description: 'Attributes to order by, multi criteria sort is supported. Prefix
           with `-` for descending order. Supported attributes: `id, dttm, dag_id,
-          task_id, run_id, event, logical_date, owner, owner_display_name, extra,
-          when, event_log_id`'
+          task_id, run_id, event, logical_date, owner, extra, when, event_log_id`'
       - name: dag_id
         in: query
         required: false
@@ -4978,20 +4548,6 @@ paths:
         description: "Case-insensitive substring match (SQL `ILIKE`). Slower than\
           \ `owner_prefix_pattern` on large tables \u2014 see \"Filtering with pattern\
           \ parameters\"."
-      - name: owner_display_name_pattern
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: "Case-insensitive substring match (SQL `ILIKE`). Slower than\
-            \ `owner_display_name_prefix_pattern` on large tables \u2014 see \"Filtering\
-            \ with pattern parameters\"."
-          title: Owner Display Name Pattern
-        description: "Case-insensitive substring match (SQL `ILIKE`). Slower than\
-          \ `owner_display_name_prefix_pattern` on large tables \u2014 see \"Filtering\
-          \ with pattern parameters\"."
       - name: event_pattern
         in: query
         required: false
@@ -5054,18 +4610,6 @@ paths:
           title: Owner Prefix Pattern
         description: Case-sensitive, index-friendly prefix match. See "Filtering with
           pattern parameters".
-      - name: owner_display_name_prefix_pattern
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          description: Case-sensitive, index-friendly prefix match. See "Filtering
-            with pattern parameters".
-          title: Owner Display Name Prefix Pattern
-        description: Case-sensitive, index-friendly prefix match. See "Filtering with
-          pattern parameters".
       - name: event_prefix_pattern
         in: query
         required: false
@@ -5078,14 +4622,6 @@ paths:
           title: Event Prefix Pattern
         description: Case-sensitive, index-friendly prefix match. See "Filtering with
           pattern parameters".
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       responses:
         '200':
           description: Successful Response
@@ -5271,13 +4807,13 @@ paths:
             type: string
           description: 'Attributes to order by, multi criteria sort is supported.
             Prefix with `-` for descending order. Supported attributes: `id, timestamp,
-            filename, source_reference, bundle_name, stacktrace, import_error_id`'
+            filename, bundle_name, stacktrace, import_error_id`'
           default:
           - id
           title: Order By
         description: 'Attributes to order by, multi criteria sort is supported. Prefix
           with `-` for descending order. Supported attributes: `id, timestamp, filename,
-          source_reference, bundle_name, stacktrace, import_error_id`'
+          bundle_name, stacktrace, import_error_id`'
       - name: filename_pattern
         in: query
         required: false
@@ -5486,14 +5022,6 @@ paths:
           - type: string
           - type: 'null'
           title: Job State
-      - name: dag_id
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Dag Id
       - name: job_type
         in: query
         required: false
@@ -5518,14 +5046,6 @@ paths:
           - type: string
           - type: 'null'
           title: Executor Class
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       responses:
         '200':
           description: Successful Response
@@ -7249,14 +6769,6 @@ paths:
             format: date-time
           - type: 'null'
           title: Run After Lt
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       - name: order_by
         in: query
         required: false
@@ -8981,14 +8493,6 @@ paths:
           items:
             type: integer
           title: Version Number
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       - name: try_number
         in: query
         required: false
@@ -11104,14 +10608,6 @@ paths:
           items:
             type: string
           title: State
-      - name: teams
-        in: query
-        required: false
-        schema:
-          type: array
-          items:
-            type: string
-          title: Teams
       - name: response_received
         in: query
         required: false
@@ -11516,140 +11012,6 @@ components:
       - timestamp
       title: AssetEventResponse
       description: Asset event serializer for responses.
-    AssetExpressionAlias:
-      properties:
-        alias:
-          $ref: '#/components/schemas/AssetExpressionAliasInfo'
-      type: object
-      required:
-      - alias
-      title: AssetExpressionAlias
-      description: 'An asset alias leaf: ``{"alias": {"name": ..., "group": ...}}``.'
-    AssetExpressionAliasInfo:
-      properties:
-        name:
-          type: string
-          title: Name
-        group:
-          type: string
-          title: Group
-      type: object
-      required:
-      - name
-      - group
-      title: AssetExpressionAliasInfo
-      description: Body of an ``alias`` leaf node.
-    AssetExpressionAll:
-      properties:
-        all:
-          items:
-            oneOf:
-            - $ref: '#/components/schemas/AssetExpressionAsset'
-            - $ref: '#/components/schemas/AssetExpressionAlias'
-            - $ref: '#/components/schemas/AssetExpressionRef'
-            - $ref: '#/components/schemas/AssetExpressionAny'
-            - $ref: '#/components/schemas/AssetExpressionAll'
-          type: array
-          title: All
-      type: object
-      required:
-      - all
-      title: AssetExpressionAll
-      description: 'An "and" node: ``{"all": [...]}`` -- satisfied when all children
-        are satisfied.'
-    AssetExpressionAny:
-      properties:
-        any:
-          items:
-            oneOf:
-            - $ref: '#/components/schemas/AssetExpressionAsset'
-            - $ref: '#/components/schemas/AssetExpressionAlias'
-            - $ref: '#/components/schemas/AssetExpressionRef'
-            - $ref: '#/components/schemas/AssetExpressionAny'
-            - $ref: '#/components/schemas/AssetExpressionAll'
-          type: array
-          title: Any
-      type: object
-      required:
-      - any
-      title: AssetExpressionAny
-      description: 'An "or" node: ``{"any": [...]}`` -- satisfied when any child is
-        satisfied.'
-    AssetExpressionAsset:
-      properties:
-        asset:
-          $ref: '#/components/schemas/AssetExpressionAssetInfo'
-      type: object
-      required:
-      - asset
-      title: AssetExpressionAsset
-      description: 'An asset leaf: ``{"asset": {"uri": ..., "name": ..., "group":
-        ...}}``.'
-    AssetExpressionAssetInfo:
-      properties:
-        uri:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Uri
-        name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Name
-        group:
-          type: string
-          title: Group
-        id:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Id
-        hidden:
-          type: boolean
-          title: Hidden
-          default: false
-      type: object
-      required:
-      - uri
-      - name
-      - group
-      title: AssetExpressionAssetInfo
-      description: 'Body of an ``asset`` leaf node.
-
-
-        ``id`` is injected by ``DagModelOperation.update_dag_asset_expression`` when
-        the expression is
-
-        persisted; ``BaseAsset.as_expression()`` itself only emits ``uri``/``name``/``group``.
-        It is left
-
-        optional so a row persisted before id-enrichment (or migrated from the pre-3.0
-        dataset format)
-
-        degrades gracefully instead of failing response validation.
-
-
-        A leaf the caller is not authorized to read is served with ``hidden`` set
-        and ``uri``, ``name``
-
-        and ``id`` blanked (see ``airflow.api_fastapi.common.asset_expression``),
-        so the shape of the
-
-        schedule stays visible without revealing which asset it waits on.'
-    AssetExpressionRef:
-      properties:
-        asset_ref:
-          additionalProperties:
-            type: string
-          type: object
-          title: Asset Ref
-      type: object
-      required:
-      - asset_ref
-      title: AssetExpressionRef
-      description: 'An unresolved asset reference leaf: ``{"asset_ref": {"name": ...}}``
-        or ``{"asset_ref": {"uri": ...}}``.'
     AssetResponse:
       properties:
         id:
@@ -11875,75 +11237,6 @@ components:
       - total_entries
       title: BackfillCollectionResponse
       description: Backfill Collection serializer for responses.
-    BackfillDagRunCollectionResponse:
-      properties:
-        backfill_dag_runs:
-          items:
-            $ref: '#/components/schemas/BackfillDagRunResponse'
-          type: array
-          title: Backfill Dag Runs
-        total_entries:
-          type: integer
-          title: Total Entries
-      type: object
-      required:
-      - backfill_dag_runs
-      - total_entries
-      title: BackfillDagRunCollectionResponse
-      description: BackfillDagRun Collection serializer for responses.
-    BackfillDagRunResponse:
-      properties:
-        id:
-          type: integer
-          minimum: 0.0
-          title: Id
-        backfill_id:
-          type: integer
-          minimum: 0.0
-          title: Backfill Id
-        dag_id:
-          type: string
-          title: Dag Id
-        dag_run_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Dag Run Id
-        logical_date:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Logical Date
-        partition_key:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Partition Key
-        sort_ordinal:
-          type: integer
-          title: Sort Ordinal
-        exception_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Exception Reason
-        dag_run_state:
-          anyOf:
-          - $ref: '#/components/schemas/DagRunState'
-          - type: 'null'
-      type: object
-      required:
-      - id
-      - backfill_id
-      - dag_id
-      - logical_date
-      - partition_key
-      - sort_ordinal
-      - exception_reason
-      title: BackfillDagRunResponse
-      description: Serializer for a single BackfillDagRun entry with joined DagRun
-        state.
     BackfillPostBody:
       properties:
         dag_id:
@@ -12059,8 +11352,9 @@ components:
       properties:
         status:
           anyOf:
-          - $ref: '#/components/schemas/HealthStatus'
+          - type: string
           - type: 'null'
+          title: Status
       type: object
       required:
       - status
@@ -12111,21 +11405,6 @@ components:
 
         This structure helps users understand which key actions succeeded and which
         failed.'
-    BulkBody_BulkDAGBody_:
-      properties:
-        actions:
-          items:
-            oneOf:
-            - $ref: '#/components/schemas/BulkCreateAction_BulkDAGBody_'
-            - $ref: '#/components/schemas/BulkUpdateAction_BulkDAGBody_'
-            - $ref: '#/components/schemas/BulkDeleteAction_BulkDAGBody_'
-          type: array
-          title: Actions
-      additionalProperties: false
-      type: object
-      required:
-      - actions
-      title: BulkBody[BulkDAGBody]
     BulkBody_BulkDAGRunBody_:
       properties:
         actions:
@@ -12201,28 +11480,6 @@ components:
       required:
       - actions
       title: BulkBody[VariableBody]
-    BulkCreateAction_BulkDAGBody_:
-      properties:
-        action:
-          type: string
-          const: create
-          title: Action
-          description: The action to be performed on the entities.
-        entities:
-          items:
-            $ref: '#/components/schemas/BulkDAGBody'
-          type: array
-          title: Entities
-          description: A list of entities to be created.
-        action_on_existence:
-          $ref: '#/components/schemas/BulkActionOnExistence'
-          default: fail
-      additionalProperties: false
-      type: object
-      required:
-      - action
-      - entities
-      title: BulkCreateAction[BulkDAGBody]
     BulkCreateAction_BulkDAGRunBody_:
       properties:
         action:
@@ -12333,26 +11590,6 @@ components:
       - action
       - entities
       title: BulkCreateAction[VariableBody]
-    BulkDAGBody:
-      properties:
-        is_paused:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Is Paused
-        scheduling_state:
-          anyOf:
-          - $ref: '#/components/schemas/DagSchedulingState'
-          - type: 'null'
-        dag_id:
-          type: string
-          title: Dag Id
-      additionalProperties: false
-      type: object
-      required:
-      - dag_id
-      title: BulkDAGBody
-      description: Request body for bulk update of Dags.
     BulkDAGRunBody:
       properties:
         dag_run_id:
@@ -12444,30 +11681,6 @@ components:
       type: object
       title: BulkDAGRunClearBody
       description: Request body for the bulk clear Dag Runs endpoint.
-    BulkDeleteAction_BulkDAGBody_:
-      properties:
-        action:
-          type: string
-          const: delete
-          title: Action
-          description: The action to be performed on the entities.
-        entities:
-          items:
-            anyOf:
-            - type: string
-            - $ref: '#/components/schemas/BulkDAGBody'
-          type: array
-          title: Entities
-          description: A list of entity id/key or entity objects to be deleted.
-        action_on_non_existence:
-          $ref: '#/components/schemas/BulkActionNotOnExistence'
-          default: fail
-      additionalProperties: false
-      type: object
-      required:
-      - action
-      - entities
-      title: BulkDeleteAction[BulkDAGBody]
     BulkDeleteAction_BulkDAGRunBody_:
       properties:
         action:
@@ -12673,38 +11886,6 @@ components:
       - task_id
       title: BulkTaskInstanceBody
       description: Request body for bulk update, and delete task instances.
-    BulkUpdateAction_BulkDAGBody_:
-      properties:
-        action:
-          type: string
-          const: update
-          title: Action
-          description: The action to be performed on the entities.
-        entities:
-          items:
-            $ref: '#/components/schemas/BulkDAGBody'
-          type: array
-          title: Entities
-          description: A list of entities to be updated.
-        update_mask:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Update Mask
-          description: A list of field names to update for each entity.Only these
-            fields will be applied from the request body to the database model.Any
-            extra fields provided will be ignored.
-        action_on_non_existence:
-          $ref: '#/components/schemas/BulkActionNotOnExistence'
-          default: fail
-      additionalProperties: false
-      type: object
-      required:
-      - action
-      - entities
-      title: BulkUpdateAction[BulkDAGBody]
     BulkUpdateAction_BulkDAGRunBody_:
       properties:
         action:
@@ -12998,14 +12179,6 @@ components:
           description: A list of `task_id` or [`task_id`, `map_index`]. If only the
             `task_id` is provided for a mapped task, all of its map indices will be
             targeted.
-        task_group_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Task Group Id
-          description: Clear every task in this task group. Mutually exclusive with
-            `task_ids`. The group's tasks are resolved on the server from the dag
-            structure, so all of them are targeted regardless of how many there are.
         dag_run_id:
           anyOf:
           - type: string
@@ -13039,13 +12212,6 @@ components:
         prevent_running_task:
           type: boolean
           title: Prevent Running Task
-          default: false
-        keep_task_state:
-          type: boolean
-          title: Keep Task State
-          description: Keep the task state store entries of the cleared task instances
-            so the next attempt resumes from them. By default they are discarded,
-            so the task starts over.
           default: false
         note:
           anyOf:
@@ -13414,9 +12580,6 @@ components:
         is_paused:
           type: boolean
           title: Is Paused
-        scheduling_state:
-          $ref: '#/components/schemas/DagSchedulingState'
-          default: active
         is_stale:
           type: boolean
           title: Is Stale
@@ -13453,9 +12616,7 @@ components:
           - type: 'null'
           title: Relative Fileloc
         fileloc:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Fileloc
         description:
           anyOf:
@@ -13547,12 +12708,8 @@ components:
           title: Dag Run Timeout
         asset_expression:
           anyOf:
-          - oneOf:
-            - $ref: '#/components/schemas/AssetExpressionAsset'
-            - $ref: '#/components/schemas/AssetExpressionAlias'
-            - $ref: '#/components/schemas/AssetExpressionRef'
-            - $ref: '#/components/schemas/AssetExpressionAny'
-            - $ref: '#/components/schemas/AssetExpressionAll'
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Asset Expression
         doc_md:
@@ -13630,11 +12787,6 @@ components:
           type: integer
           title: Active Runs Count
           default: 0
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
         is_backfillable:
           type: boolean
           title: Is Backfillable
@@ -13712,16 +12864,12 @@ components:
     DAGPatchBody:
       properties:
         is_paused:
-          anyOf:
-          - type: boolean
-          - type: 'null'
+          type: boolean
           title: Is Paused
-        scheduling_state:
-          anyOf:
-          - $ref: '#/components/schemas/DagSchedulingState'
-          - type: 'null'
       additionalProperties: false
       type: object
+      required:
+      - is_paused
       title: DAGPatchBody
       description: Dag Serializer for updatable bodies.
     DAGResponse:
@@ -13735,9 +12883,6 @@ components:
         is_paused:
           type: boolean
           title: Is Paused
-        scheduling_state:
-          $ref: '#/components/schemas/DagSchedulingState'
-          default: active
         is_stale:
           type: boolean
           title: Is Stale
@@ -13774,9 +12919,7 @@ components:
           - type: 'null'
           title: Relative Fileloc
         fileloc:
-          anyOf:
-          - type: string
-          - type: 'null'
+          type: string
           title: Fileloc
         description:
           anyOf:
@@ -14114,11 +13257,6 @@ components:
             format: date-time
           - type: 'null'
           title: Partition Date
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
       type: object
       required:
       - dag_run_id
@@ -14321,11 +13459,6 @@ components:
         dag_display_name:
           type: string
           title: Dag Display Name
-        language:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Language
       type: object
       required:
       - content
@@ -14388,12 +13521,7 @@ components:
           type: string
           title: Dag Id
         warning_type:
-          anyOf:
-          - $ref: '#/components/schemas/DagWarningType'
-          - type: string
-            maxLength: 50
-            pattern: ^[a-z][a-z0-9_]*:[a-z0-9_.\-]+$
-          title: Warning Type
+          $ref: '#/components/schemas/DagWarningType'
         message:
           type: string
           title: Message
@@ -14413,259 +13541,24 @@ components:
       - dag_display_name
       title: DAGWarningResponse
       description: Dag Warning serializer for responses.
-    DagBundleCollectionResponse:
-      properties:
-        dag_bundles:
-          items:
-            $ref: '#/components/schemas/DagBundleResponse'
-          type: array
-          title: Dag Bundles
-        total_entries:
-          type: integer
-          title: Total Entries
-      type: object
-      required:
-      - dag_bundles
-      - total_entries
-      title: DagBundleCollectionResponse
-      description: Dag bundle collection response.
-    DagBundleDetailResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        active:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-          description: Whether the bundle is still present in this deployment's configuration.
-        version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Version
-          description: The latest version Airflow has seen for the bundle. Null when
-            the bundle does not support versioning, or when no Dag processor has refreshed
-            it successfully yet.
-        last_refreshed:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Last Refreshed
-          description: When a Dag processor last successfully refreshed the bundle.
-            It advances even when the version did not change, and a failed refresh
-            leaves it untouched.
-        bundle_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Bundle Url
-          description: A link to view the bundle at ``version``, when one is configured
-            and the caller may read Dag versions.
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
-          description: The team owning the bundle, in a multi-team deployment.
-        import_error_count:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Import Error Count
-          description: Number of Dag import errors recorded against this bundle that
-            the caller is permitted to see, counted on the same terms as ``GET /importErrors``.
-            Null when the caller may not read import errors.
-        dag_count:
-          type: integer
-          title: Dag Count
-          description: Number of live Dags recorded against the bundle that the caller
-            is permitted to see, counted on the same terms as ``GET /dags``.
-      type: object
-      required:
-      - name
-      - active
-      - version
-      - last_refreshed
-      - bundle_url
-      - team_name
-      - import_error_count
-      - dag_count
-      title: DagBundleDetailResponse
-      description: Dag bundle serializer for the single-bundle response.
-    DagBundleFileCollectionResponse:
-      properties:
-        dag_bundle_files:
-          items:
-            $ref: '#/components/schemas/DagBundleFileResponse'
-          type: array
-          title: Dag Bundle Files
-        total_entries:
-          type: integer
-          title: Total Entries
-      type: object
-      required:
-      - dag_bundle_files
-      - total_entries
-      title: DagBundleFileCollectionResponse
-      description: Dag bundle file collection response.
-    DagBundleFileResponse:
-      properties:
-        relative_fileloc:
-          type: string
-          title: Relative Fileloc
-        dag_count:
-          type: integer
-          title: Dag Count
-          description: Number of live Dags the file defines that the caller may read.
-        last_parsed_time:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Last Parsed Time
-          description: When the file was last parsed, or null if it has never parsed
-            successfully.
-        last_parse_duration:
-          anyOf:
-          - type: number
-          - type: 'null'
-          title: Last Parse Duration
-          description: How long the last successful parse of the file took, in seconds.
-        import_error_count:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Import Error Count
-          description: Number of import errors recorded against the file, which is
-            at most one. Null when the caller may not read import errors -- deliberately
-            not zero, which would read as a file with nothing wrong.
-      type: object
-      required:
-      - relative_fileloc
-      - dag_count
-      - last_parsed_time
-      - last_parse_duration
-      - import_error_count
-      title: DagBundleFileResponse
-      description: A file in a Dag bundle, as the Dag processor last saw it.
-    DagBundleResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        active:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-          description: Whether the bundle is still present in this deployment's configuration.
-        version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Version
-          description: The latest version Airflow has seen for the bundle. Null when
-            the bundle does not support versioning, or when no Dag processor has refreshed
-            it successfully yet.
-        last_refreshed:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
-          title: Last Refreshed
-          description: When a Dag processor last successfully refreshed the bundle.
-            It advances even when the version did not change, and a failed refresh
-            leaves it untouched.
-        bundle_url:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Bundle Url
-          description: A link to view the bundle at ``version``, when one is configured
-            and the caller may read Dag versions.
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
-          description: The team owning the bundle, in a multi-team deployment.
-        import_error_count:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          title: Import Error Count
-          description: Number of Dag import errors recorded against this bundle that
-            the caller is permitted to see, counted on the same terms as ``GET /importErrors``.
-            Null when the caller may not read import errors.
-      type: object
-      required:
-      - name
-      - active
-      - version
-      - last_refreshed
-      - bundle_url
-      - team_name
-      - import_error_count
-      title: DagBundleResponse
-      description: Dag bundle serializer for responses.
     DagProcessorInfoResponse:
       properties:
         status:
           anyOf:
-          - $ref: '#/components/schemas/HealthStatus'
+          - type: string
           - type: 'null'
+          title: Status
         latest_dag_processor_heartbeat:
           anyOf:
           - type: string
           - type: 'null'
           title: Latest Dag Processor Heartbeat
-        detailed_status:
-          anyOf:
-          - $ref: '#/components/schemas/DetailedHealthStatus'
-          - type: 'null'
-        instances:
-          anyOf:
-          - items:
-              $ref: '#/components/schemas/DagProcessorInstanceInfoResponse'
-            type: array
-          - type: 'null'
-          title: Instances
       type: object
       required:
       - status
       - latest_dag_processor_heartbeat
-      - detailed_status
       title: DagProcessorInfoResponse
       description: DagProcessor info serializer for responses.
-    DagProcessorInstanceInfoResponse:
-      properties:
-        hostname:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Hostname
-        latest_dag_processor_heartbeat:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Latest Dag Processor Heartbeat
-        bundle_names:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Bundle Names
-      type: object
-      required:
-      - hostname
-      - latest_dag_processor_heartbeat
-      - bundle_names
-      title: DagProcessorInstanceInfoResponse
-      description: Dag processor instance info serializer for responses.
     DagRunAssetReference:
       properties:
         run_id:
@@ -14681,10 +13574,8 @@ components:
           - type: 'null'
           title: Logical Date
         start_date:
-          anyOf:
-          - type: string
-            format: date-time
-          - type: 'null'
+          type: string
+          format: date-time
           title: Start Date
         end_date:
           anyOf:
@@ -14794,11 +13685,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
       additionalProperties: false
       type: object
       required:
@@ -14807,14 +13693,6 @@ components:
       - updated_at
       title: DagScheduleAssetReference
       description: Dag schedule reference serializer for assets.
-    DagSchedulingState:
-      type: string
-      enum:
-      - active
-      - draining
-      - paused
-      title: DagSchedulingState
-      description: States controlling whether a Dag can create and schedule work.
     DagStatsCollectionResponse:
       properties:
         dags:
@@ -14932,7 +13810,6 @@ components:
       type: string
       enum:
       - asset conflict
-      - duplicate dag id
       - non-existent pool
       - runtime varying value
       title: DagWarningType
@@ -14942,14 +13819,6 @@ components:
         This is the set of allowable values for the ``warning_type`` field
 
         in the DagWarning model.'
-    DetailedHealthStatus:
-      type: string
-      enum:
-      - healthy
-      - degraded
-      - down
-      title: DetailedHealthStatus
-      description: How much of a component's work has a live instance covering it.
     DryRunBackfillCollectionResponse:
       properties:
         backfills:
@@ -15056,11 +13925,6 @@ components:
           - type: string
           - type: 'null'
           title: Owner
-        owner_display_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Owner Display Name
         extra:
           anyOf:
           - type: string
@@ -15076,11 +13940,6 @@ components:
           - type: string
           - type: 'null'
           title: Task Display Name
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
       type: object
       required:
       - event_log_id
@@ -15093,7 +13952,6 @@ components:
       - event
       - logical_date
       - owner
-      - owner_display_name
       - extra
       title: EventLogResponse
       description: Event Log Response.
@@ -15138,10 +13996,6 @@ components:
           - type: 'null'
           title: Nav Top Level
           default: false
-        applies_to:
-          anyOf:
-          - $ref: '#/components/schemas/PluginAppliesToResponse'
-          - type: 'null'
         href:
           type: string
           title: Href
@@ -15153,7 +14007,6 @@ components:
           - dag_run
           - task
           - task_instance
-          - asset
           - base
           title: Destination
           default: nav
@@ -15462,14 +14315,6 @@ components:
       - triggerer
       title: HealthInfoResponse
       description: Health serializer for responses.
-    HealthStatus:
-      type: string
-      enum:
-      - healthy
-      - unhealthy
-      title: HealthStatus
-      description: 'Aggregate health of a component: whether it has at least one live
-        instance.'
     ImportErrorCollectionResponse:
       properties:
         import_errors:
@@ -15498,11 +14343,6 @@ components:
         filename:
           type: string
           title: Filename
-        source_reference:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Source Reference
         bundle_name:
           anyOf:
           - type: string
@@ -15511,21 +14351,13 @@ components:
         stack_trace:
           type: string
           title: Stack Trace
-        file_token:
-          type: string
-          title: File Token
-          description: Return a signed token identifying the file, used to request
-            its reparse.
-          readOnly: true
       type: object
       required:
       - import_error_id
       - timestamp
       - filename
-      - source_reference
       - bundle_name
       - stack_trace
-      - file_token
       title: ImportErrorResponse
       description: Import Error Response.
     JobCollectionResponse:
@@ -15597,18 +14429,6 @@ components:
           - type: string
           - type: 'null'
           title: Unixname
-        team_names:
-          items:
-            type: string
-          type: array
-          title: Team Names
-        bundle_names:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Bundle Names
         dag_display_name:
           anyOf:
           - type: string
@@ -15693,11 +14513,6 @@ components:
           - type: string
           - type: 'null'
           title: Partition Key
-        bundle_version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Bundle Version
       additionalProperties: false
       type: object
       title: MaterializeAssetBody
@@ -15749,47 +14564,6 @@ components:
       type: object
       title: PatchTaskInstanceBody
       description: Request body for patching task instance state.
-    PluginAppliesToResponse:
-      properties:
-        dag_tags:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Dag Tags
-        dag_ids:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Dag Ids
-        task_ids:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Task Ids
-        operators:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Operators
-        operator_names:
-          anyOf:
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          title: Operator Names
-      additionalProperties: false
-      type: object
-      title: PluginAppliesToResponse
-      description: Serializer for the optional Dag/task scoping criteria of a UI plugin.
     PluginCollectionResponse:
       properties:
         plugins:
@@ -15841,11 +14615,6 @@ components:
         name:
           type: string
           title: Name
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
         macros:
           items:
             type: string
@@ -16178,10 +14947,6 @@ components:
           - type: 'null'
           title: Nav Top Level
           default: false
-        applies_to:
-          anyOf:
-          - $ref: '#/components/schemas/PluginAppliesToResponse'
-          - type: 'null'
         bundle_url:
           type: string
           title: Bundle Url
@@ -16193,11 +14958,8 @@ components:
           - dag_run
           - task
           - task_instance
-          - asset
           - base
           - dashboard
-          - dag_overview
-          - task_overview
           title: Destination
           default: nav
       additionalProperties: true
@@ -16222,49 +14984,20 @@ components:
       properties:
         status:
           anyOf:
-          - $ref: '#/components/schemas/HealthStatus'
+          - type: string
           - type: 'null'
+          title: Status
         latest_scheduler_heartbeat:
           anyOf:
           - type: string
           - type: 'null'
           title: Latest Scheduler Heartbeat
-        detailed_status:
-          anyOf:
-          - $ref: '#/components/schemas/DetailedHealthStatus'
-          - type: 'null'
-        instances:
-          anyOf:
-          - items:
-              $ref: '#/components/schemas/SchedulerInstanceInfoResponse'
-            type: array
-          - type: 'null'
-          title: Instances
       type: object
       required:
       - status
       - latest_scheduler_heartbeat
-      - detailed_status
       title: SchedulerInfoResponse
       description: Scheduler info serializer for responses.
-    SchedulerInstanceInfoResponse:
-      properties:
-        hostname:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Hostname
-        latest_scheduler_heartbeat:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Latest Scheduler Heartbeat
-      type: object
-      required:
-      - hostname
-      - latest_scheduler_heartbeat
-      title: SchedulerInstanceInfoResponse
-      description: Scheduler instance info serializer for responses.
     StructuredLogMessage:
       properties:
         timestamp:
@@ -16530,15 +15263,6 @@ components:
           anyOf:
           - $ref: '#/components/schemas/DagVersionResponse'
           - type: 'null'
-        state_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: State Reason
-          description: 'The reason the task instance reached its current state, as
-            recorded by a retry policy. May describe a previous attempt: it is cleared
-            only when the task next starts running, so a task waiting to be retried
-            or re-run can still carry the reason its last attempt ended.'
       type: object
       required:
       - task_id
@@ -16717,20 +15441,6 @@ components:
           anyOf:
           - $ref: '#/components/schemas/DagVersionResponse'
           - type: 'null'
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
-        state_reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: State Reason
-          description: 'The reason the task instance reached its current state, as
-            recorded by a retry policy. May describe a previous attempt: it is cleared
-            only when the task next starts running, so a task waiting to be retried
-            or re-run can still carry the reason its last attempt ended.'
       type: object
       required:
       - id
@@ -17015,11 +15725,6 @@ components:
           type: string
           format: date-time
           title: Updated At
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
       additionalProperties: false
       type: object
       required:
@@ -17349,11 +16054,6 @@ components:
           - type: string
           - type: 'null'
           title: Partition Key
-        bundle_version:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Bundle Version
       additionalProperties: false
       type: object
       required:
@@ -17400,55 +16100,20 @@ components:
       properties:
         status:
           anyOf:
-          - $ref: '#/components/schemas/HealthStatus'
+          - type: string
           - type: 'null'
+          title: Status
         latest_triggerer_heartbeat:
           anyOf:
           - type: string
           - type: 'null'
           title: Latest Triggerer Heartbeat
-        detailed_status:
-          anyOf:
-          - $ref: '#/components/schemas/DetailedHealthStatus'
-          - type: 'null'
-        instances:
-          anyOf:
-          - items:
-              $ref: '#/components/schemas/TriggererInstanceInfoResponse'
-            type: array
-          - type: 'null'
-          title: Instances
       type: object
       required:
       - status
       - latest_triggerer_heartbeat
-      - detailed_status
       title: TriggererInfoResponse
       description: Triggerer info serializer for responses.
-    TriggererInstanceInfoResponse:
-      properties:
-        hostname:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Hostname
-        latest_triggerer_heartbeat:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Latest Triggerer Heartbeat
-        team_names:
-          items:
-            type: string
-          type: array
-          title: Team Names
-      type: object
-      required:
-      - hostname
-      - latest_triggerer_heartbeat
-      - team_names
-      title: TriggererInstanceInfoResponse
-      description: Triggerer instance info serializer for responses.
     UpdateHITLDetailPayload:
       properties:
         chosen_options:
@@ -17652,11 +16317,6 @@ components:
           type: string
           format: date-time
           title: Run After
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
       type: object
       required:
       - key
@@ -17708,11 +16368,6 @@ components:
           type: string
           format: date-time
           title: Run After
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
         value:
           title: Value
       type: object
@@ -17767,11 +16422,6 @@ components:
           type: string
           format: date-time
           title: Run After
-        team_name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Team Name
         value:
           anyOf:
           - type: string
