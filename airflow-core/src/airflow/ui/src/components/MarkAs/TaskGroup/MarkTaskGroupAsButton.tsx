@@ -28,7 +28,7 @@ import { IconButton, Menu, Tooltip } from "src/components/ui";
 import { SHORTCUTS } from "src/context/keyboardShortcuts";
 import { useShortcut } from "src/hooks/useShortcut";
 
-import { allowedStates } from "../utils";
+import { taskGroupAllowedStates } from "../utils";
 import MarkTaskGroupAsDialog from "./MarkTaskGroupAsDialog";
 
 type Props = {
@@ -76,7 +76,7 @@ const MarkTaskGroupAsButton = ({ groupTaskInstance, isHotkeyEnabled = false }: P
           </IconButton>
         </Menu.Trigger>
         <Menu.Content>
-          {allowedStates.map((menuState) => {
+          {taskGroupAllowedStates.map((menuState) => {
             const content = translate(
               `dags:runAndTaskActions.markAs.buttonTooltip.${menuState === "success" ? "success" : "failed"}`,
             );

@@ -16,6 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import type { DagRunMutableStates } from "openapi/requests/types.gen";
+import type { DagRunMutableStates, TaskInstanceState } from "openapi/requests/types.gen";
 
-export const allowedStates: Array<DagRunMutableStates> = ["success", "failed"];
+export const dagRunAllowedStates: Array<DagRunMutableStates> = ["success", "failed"];
+
+export const taskGroupAllowedStates: Array<TaskInstanceState> = ["success", "failed"];
+
+export const taskInstanceAllowedStates: Array<TaskInstanceState> = [
+    "success",
+    "failed",
+    "skipped"
+]
