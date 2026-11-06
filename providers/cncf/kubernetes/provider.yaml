@@ -468,6 +468,14 @@ config:
         type: integer
         example: ~
         default: "0"
+      startup_preemption_retry_attempts:
+        description: |
+          Number of attempts to retry launching a replacement pod when the pod disappears
+          (404 error) before it begins running.
+        version_added: ~
+        ype: integer
+        example: ~
+        default: "3"
 
 executors:
   - airflow.providers.cncf.kubernetes.executors.kubernetes_executor.KubernetesExecutor

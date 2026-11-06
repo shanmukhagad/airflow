@@ -144,6 +144,36 @@ def log_pod_event(
         involved_object: V1ObjectReference = event.involved_object
         pod_manager.log.info("The Pod has an Event: %s from %s", event.message, involved_object.field_path)
 
+# method added 
+def _base_container_may_have_run(pod: V1Pod, base_container_name: str) -> bool:
+    '''Checks if the pod or its main container has reached a state indicating that the workload has started executing 
+        (e.g., Running, Succeeded, or Terminated).'''
+
+
+    status = getattr(pod, "status", None)
+    
+    # Check if the pod's broad phase- RUNNING, SUCCEEDED, or FAILED.
+    if getattr(status, "phase", None) in (PodPhase.RUNNING, PodPhase.SUCCEEDED, PodPhase.FAILED):
+        return True  
+        
+    # check the individual containers inside the pod.
+    container_statuses = getattr(status, "container_statuses", None)
+    
+    #pod hasn't started
+    if not isinstance(container_statuses, list):
+        return False
+        
+    for container_status in container_statuses:
+        if getattr(container_status, "name", None) != base_container_name:
+            continue
+            
+        state = getattr(container_status, "state", None)
+
+        if getattr(state, "running", None) is not None or getattr(state, "terminated", None) is not None:
+            return True  
+  
+    return False
+
 
 async def await_pod_start(
     pod_manager: PodManager | AsyncPodManager,
@@ -151,6 +181,7 @@ async def await_pod_start(
     schedule_timeout: int = 120,
     startup_timeout: int = 120,
     check_interval: float = 1,
+    base_container_name: str = "base"   # adding new param
 ):
     """
     Monitor the startup phase of a Kubernetes pod, waiting for it to leave the ``Pending`` state.
@@ -168,11 +199,18 @@ async def await_pod_start(
     pod_was_scheduled = False
     start_check_time = time.time()
     is_async = isinstance(pod_manager, AsyncPodManager)
+
+    setattr(pod_manager, "_startup_observed_started", False)
+
     while True:
         if is_async:
             remote_pod = await pod_manager.read_pod(pod)
         else:
             remote_pod = pod_manager.read_pod(pod)
+
+        if _base_container_may_have_run(remote_pod, base_container_name):
+            setattr(pod_manager, "_startup_observed_started", True)
+
         pod_status = remote_pod.status
 
         if pod_status.phase == PodPhase.FAILED and pod_status.container_statuses is None:
