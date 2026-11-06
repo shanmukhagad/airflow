@@ -4704,7 +4704,7 @@ class TestLengthPrefixedFrameReader:
 
         supervisor = object.__new__(ActivitySubprocess)
         supervisor.ti = mock_ti
-        supervisor._timeout_deadline = time.monotonic() - 1  # Expired deadline
+        supervisor._timeout_deadline = time.monotonic() - 1 
 
         mock_kill = mocker.patch.object(ActivitySubprocess, "kill")
 
