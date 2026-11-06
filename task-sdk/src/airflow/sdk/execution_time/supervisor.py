@@ -2086,10 +2086,16 @@ class InProcessTestSupervisor(ActivitySubprocess):
     stdin: socket = attrs.field(init=False)
 
     class _Client(Client):
-        def request(self, *args, **kwargs):
-            # Bypass the tenacity retries!
-            return super().request.__wrapped__(self, *args, **kwargs)  # type: ignore[attr-defined]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+        # Prevents long retry backoffs during tests
+            self._api_retries = 1
 
+        def request(self, *args, **kwargs):
+            req = super().request
+            if hasattr(req, "__wrapped__"):
+                return req.__wrapped__(self, *args, **kwargs)
+            return req(*args, **kwargs)
     def _check_subprocess_exit(
         self, raise_on_timeout: bool = False, expect_signal: None | int = None
     ) -> int | None:
