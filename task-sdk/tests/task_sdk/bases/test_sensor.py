@@ -691,14 +691,15 @@ class TestAsyncSensor:
     @pytest.mark.parametrize(
         ("soft_fail", "expected_exception"),
         [
-            (True, AirflowSkipException),
+            (True, AirflowException),
             (False, AirflowException),
         ],
     )
     def test_fail_after_resuming_deferred_sensor(self, soft_fail, expected_exception):
         async_sensor = DummyAsyncSensor(task_id="dummy_async_sensor", soft_fail=soft_fail)
-        with pytest.raises(expected_exception):
+        with pytest.raises(expected_exception) as exc_info:
             async_sensor.resume_execution("execute_complete", None, {})
+        assert type(exc_info.value) is expected_exception
 
     @pytest.mark.parametrize(
         ("soft_fail", "expected_exception"),
@@ -730,14 +731,14 @@ class TestAsyncSensor:
     @pytest.mark.parametrize(
         ("soft_fail", "expected_exception"),
         [
-            (True, AirflowSkipException),
+            (True, TaskDeferralError),
             (False, TaskDeferralError),
         ],
     )
     def test_trigger_failure_after_resuming_deferred_sensor_with_soft_fail(
         self, soft_fail, expected_exception
     ):
-        """Test that deferrable sensors with soft_fail skip on trigger failure instead of failing."""
+        """Test that deferrable sensors with soft_fail skip on trigger failure"""
         async_sensor = DummyAsyncSensor(task_id="dummy_async_sensor", soft_fail=soft_fail)
         with pytest.raises(expected_exception):
             async_sensor.resume_execution(
