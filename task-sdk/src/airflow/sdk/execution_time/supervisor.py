@@ -663,6 +663,8 @@ class WatchedSubprocess:
     start_time: float = attrs.field(factory=time.monotonic)
     """The start time of the child process."""
 
+    _stopped: bool = attrs.field(default=False, init=False)
+
     @classmethod
     def start(
         cls,
@@ -1411,6 +1413,7 @@ class ActivitySubprocess(WatchedSubprocess):
 
     _task_end_time_monotonic: float | None = attrs.field(default=None, init=False)
     _rendered_map_index: str | None = attrs.field(default=None, init=False)
+
     _timeout_deadline: float | None = attrs.field(default=None, init=False)
     decoder: ClassVar[TypeAdapter[ToSupervisor]] = TypeAdapter(ToSupervisor)
 
@@ -1705,6 +1708,8 @@ class ActivitySubprocess(WatchedSubprocess):
                 self._handle_process_overtime_if_needed()
 
     def _handle_process_overtime_if_needed(self):
+        """Handle termination of auxiliary processes if the task exceeds the configured overtime."""
+        # If the task has reached a terminal state, we can start monitoring the overtime
         if not self._terminal_state:
             return
         if (
@@ -2105,22 +2110,23 @@ class InProcessTestSupervisor(ActivitySubprocess):
 
     stdin: socket = attrs.field(init=False)
 
-    class _Client(Client):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-        # Prevents long retry backoffs during tests
-            self._api_retries = 1
+class _Client(Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Prevent long retry backoffs during tests.
+        self._api_retries = 1
 
-        def request(self, *args, **kwargs):
-            req = super().request
-            if hasattr(req, "__wrapped__"):
-                return req.__wrapped__(self, *args, **kwargs)
-            return req(*args, **kwargs)
+    def request(self, *args, **kwargs):
+        req = super().request
+        if hasattr(req, "__wrapped__"):
+            return req.__wrapped__(self, *args, **kwargs)
+        return req(*args, **kwargs)
+    
     def _check_subprocess_exit(
         self, raise_on_timeout: bool = False, expect_signal: None | int = None
     ) -> int | None:
-        # InProcessSupervisor has no subprocess, so we don't need to poll anything. This is called from
-        # _handle_socket_comms, so we need to override it
+        # InProcessSupervisor has no subprocess, so we don't need to poll anything.
+        # This is called from _handle_socket_comms.
         return None
 
     def _handle_socket_comms(self):
