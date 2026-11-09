@@ -31,7 +31,7 @@ import threading
 import time
 from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from operator import attrgetter
 from random import randint
 from textwrap import dedent
@@ -4697,3 +4697,18 @@ class TestLengthPrefixedFrameReader:
                 break
 
         assert received == [_RequestFrame(id=42, body={"key": "foo"})]
+
+    def test_supervisor_execution_timeout_kills_task(self, mocker):
+        mock_ti = MagicMock()
+        mock_ti.execution_timeout = timedelta(seconds=2)
+
+        supervisor = object.__new__(ActivitySubprocess)
+        supervisor.ti = mock_ti
+        supervisor._timeout_deadline = time.monotonic() - 1 
+
+        mock_kill = mocker.patch.object(ActivitySubprocess, "kill")
+
+        supervisor._handle_execution_timeout_if_needed()
+
+        mock_kill.assert_called_once_with(signal.SIGTERM, force=True)
+        assert supervisor._timeout_deadline is None
