@@ -598,7 +598,7 @@ class PsutilTracker(ProcessTracker):
     def send_signal(self, s: signal.Signals) -> None:
         self._impl.send_signal(s)
 
-    def wait(self, timeout: float | None) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         return self._impl.wait(timeout)
 
 
@@ -662,7 +662,6 @@ class WatchedSubprocess:
 
     start_time: float = attrs.field(factory=time.monotonic)
     """The start time of the child process."""
-
     _stopped: bool = attrs.field(default=False, init=False)
 
     @classmethod
@@ -1384,6 +1383,7 @@ def _remote_logging_conn(client: Client):
 class ActivitySubprocess(WatchedSubprocess):
     client: Client
     """The HTTP client to use for communication with the API server."""
+    _wait_completed: bool = attrs.field(default=False, init=False)
 
     _terminal_state: str | None = attrs.field(default=None, init=False)
     _final_state: str | None = attrs.field(default=None, init=False)
@@ -1465,6 +1465,13 @@ class ActivitySubprocess(WatchedSubprocess):
             self.kill(signal.SIGTERM, force=True)
             self._timeout_deadline = None
 
+    def _execution_timeout_due_in(self) -> float:
+        """Return seconds remaining until execution timeout."""
+        if self._timeout_deadline is None:
+            return float("inf")
+
+        return max(0.0, self._timeout_deadline - time.monotonic())
+
     def _on_child_started(
         self,
         *,
@@ -1518,8 +1525,40 @@ class ActivitySubprocess(WatchedSubprocess):
             log.debug("Couldn't send startup message to Subprocess - it died very early", pid=self.pid)
 
     def wait(self) -> int:
-        if self._exit_code is not None:
+        if self._wait_completed and self._exit_code is not None:
             return self._exit_code
+
+        prev_sigterm = signal.getsignal(signal.SIGTERM)
+        prev_sigint = signal.getsignal(signal.SIGINT)
+
+        def _forward_signal(signum, frame):
+            log.info(
+                "Received signal, forwarding to task subprocess",
+                signal=signal.Signals(signum).name,
+                pid=self.pid,
+            )
+            with suppress(ProcessLookupError):
+                os.kill(self.pid, signum)
+
+        signal.signal(signal.SIGTERM, _forward_signal)
+        signal.signal(signal.SIGINT, _forward_signal)
+
+        try:
+            self._monitor_subprocess()
+        finally:
+            self.selector.close()
+            signal.signal(signal.SIGTERM, prev_sigterm)
+            signal.signal(signal.SIGINT, prev_sigint)
+
+        self._exit_code = self._exit_code if self._exit_code is not None else 1
+
+        try:
+            self.update_task_state_if_needed()
+        finally:
+            self._wait_completed = True
+            self._upload_logs()
+
+        return self._exit_code
 
         # Forward termination signals to the task subprocess so the operator's
         # on_kill() hook runs on graceful shutdown (e.g. K8s pod SIGTERM).
@@ -1670,6 +1709,7 @@ class ActivitySubprocess(WatchedSubprocess):
         - Sends heartbeats to ensure the process is alive and checks if the subprocess has exited.
         """
         while self._exit_code is None or self._open_sockets:
+            self._handle_execution_timeout_if_needed()
             last_heartbeat_ago = time.monotonic() - self._last_successful_heartbeat
             # Monitor the task to see if it's done. Wait in a syscall (`select`) for as long as possible
             # so we notice the subprocess finishing as quick as we can.
@@ -1679,6 +1719,7 @@ class ActivitySubprocess(WatchedSubprocess):
                     # Ensure we heartbeat _at most_ 75% through the task instance heartbeat timeout time
                     HEARTBEAT_TIMEOUT - last_heartbeat_ago * 0.75,
                     MIN_HEARTBEAT_INTERVAL,
+                    self._execution_timeout_due_in(),
                 ),
             )
             # Block until events are ready or the timeout is reached
@@ -1705,8 +1746,6 @@ class ActivitySubprocess(WatchedSubprocess):
                 # logs
                 self._send_heartbeat_if_needed()
 
-                self._handle_process_overtime_if_needed()
-
     def _handle_process_overtime_if_needed(self):
         """Handle termination of auxiliary processes if the task exceeds the configured overtime."""
         # If the task has reached a terminal state, we can start monitoring the overtime
@@ -1723,10 +1762,6 @@ class ActivitySubprocess(WatchedSubprocess):
                 ti_id=self.id,
             )
             self.kill(signal.SIGTERM, force=True)
-
-    def _monitor_subprocess(self) -> None:
-        while not self._stopped:
-            self._handle_execution_timeout_if_needed()
 
     def _send_heartbeat_if_needed(self):
         """Send a heartbeat to the client if heartbeat interval has passed."""
@@ -2110,11 +2145,11 @@ class InProcessTestSupervisor(ActivitySubprocess):
 
     stdin: socket = attrs.field(init=False)
 
-class _Client(Client):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Prevent long retry backoffs during tests.
-        self._api_retries = 1
+    class _Client(Client):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # Prevent long retry backoffs during tests.
+            self._api_retries = 1
 
     def request(self, *args, **kwargs):
         req = super().request
