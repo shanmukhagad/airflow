@@ -753,9 +753,9 @@ class KubernetesPodOperator(BaseOperator):
                     operator=self,
                 )
     
-    def extract_xcom(self, pod: k8s.V1Pod) -> dict[Any, Any] | None:
+    def extract_xcom(self, pod: k8s.V1Pod, *, ignore_kill_failure: bool = True) -> dict[Any, Any] | None:
         """Retrieve xcom value and kill xcom sidecar container."""
-        result = self.pod_manager.extract_xcom(pod)
+        result = self.pod_manager.extract_xcom(pod, ignore_kill_failure=ignore_kill_failure)
         if isinstance(result, str) and result.rstrip() == EMPTY_XCOM_RESULT:
             self.log.info("xcom result file is empty.")
             return None
