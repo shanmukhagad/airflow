@@ -46,10 +46,14 @@ if TYPE_CHECKING:
 
 
 def _url_from_endpoint(base_url: str | None, endpoint: str | None) -> str:
-    """Combine base url with endpoint."""
-    if base_url and not base_url.endswith("/") and endpoint and not endpoint.startswith("/"):
-        return f"{base_url}/{endpoint}"
-    return (base_url or "") + (endpoint or "")
+    """Combine base URL and endpoint with a single boundary slash."""
+    if not base_url:
+        return endpoint or ""
+    if not endpoint:
+        return base_url
+    if base_url.endswith("://"):
+        return base_url + endpoint.lstrip("/")
+    return f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
 
 
 def _process_extra_options_from_connection(

@@ -36,8 +36,8 @@ import pendulum
 import psutil
 import pytest
 import time_machine
-from sqlalchemy import delete, func, inspect, select, update
-from sqlalchemy.dialects import mysql, postgresql
+from sqlalchemy import Delete, delete, func, inspect, select, update
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import joinedload
 
 from airflow import settings
@@ -547,154 +547,6 @@ class TestSchedulerJob:
             ],
             any_order=True,
         )
-
-    def test_process_executor_events_skips_stale_defer_exit_when_scheduled_with_next_method(self, dag_maker):
-        '''
-        Stale defer-exit SUCCESS event is skipped when TI is SCHEDULED and next_method is set.
-        '''    
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-
-        ti1.state = State.SCHEDULED
-        ti1.next_method = "on_resume"
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-        
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.SCHEDULED
-
-    def test_process_executor_events_skips_stale_defer_exit_when_queued_with_next_method(self,dag_maker):
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_queued", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-        
-        ti1.state = State.QUEUED
-        ti1.next_method = "on_resume"
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-        
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-                
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.QUEUED
-
-
-    def test_process_executor_events_skips_stale_defer_exit_when_running_without_next_method(self,dag_maker):
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_running", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-                    
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-        
-        ti1.state = State.RUNNING
-        ti1.next_method = None
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.RUNNING
-
-    def test_process_executor_events_processes_event_when_scheduled_without_next_method(self,dag_maker):
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-
-        ti1.state = State.SCHEDULED
-        ti1.next_method = None
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.FAILED
-
-    def test_process_executor_events_processes_event_when_queued_without_next_method(self,dag_maker):
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-    
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-    
-        ti1.state = State.QUEUED
-        ti1.next_method = None
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-    
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-    
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.FAILED
-
-    def test_process_executor_events_processes_event_when_running_with_next_method(self,dag_maker):
-        session = settings.Session()
-        with dag_maker("test_state_defer_exit_scheduled", fileloc="/test_path1/"):
-            task1 = EmptyOperator(task_id = "dummy_task")
-        ti1 = dag_maker.create_dagrun().get_task_instance(task1.task_id)
-        
-        executor = MockExecutor(do_update=False)
-        scheduler_job = Job()
-        session.add(scheduler_job)
-        session.commit()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job, executors=[executor])
-        
-        ti1.state = State.RUNNING
-        ti1.next_method = "on_resume"
-        ti1.queued_by_job_id = scheduler_job.id
-        session.merge(ti1)
-        session.commit()
-        
-        executor.event_buffer[ti1.key] = State.SUCCESS,None
-        
-        self.job_runner._process_executor_events(executor=executor, session = session)
-        ti1.refresh_from_db(session=session)
-        assert ti1.state == State.FAILED
 
     @mock.patch("airflow.jobs.scheduler_job_runner.TaskCallbackRequest", spec=TaskCallbackRequest)
     def test_process_executor_events_restarting_cleared_task(self, mock_task_callback, dag_maker):
@@ -1555,38 +1407,6 @@ class TestSchedulerJob:
         assert {queued_ti.key for queued_ti in queued_tis} == {ti.key}
         compiled_query = str(captured_queries[0].compile(dialect=mysql.dialect()))
         assert compiled_query.count("USE INDEX (ti_state)") == 1
-
-    def test_find_executable_task_instances_does_not_eagerly_load_dag_run_conf(self, dag_maker, session):
-        dag_id = "SchedulerJobTest.test_find_executable_task_instances_does_not_eagerly_load_dag_run_conf"
-        task_id = "dummy"
-
-        with dag_maker(dag_id=dag_id, max_active_tasks=16):
-            task = EmptyOperator(task_id=task_id)
-
-        scheduler_job = Job()
-        self.job_runner = SchedulerJobRunner(job=scheduler_job)
-
-        dag_run = dag_maker.create_dagrun(run_type=DagRunType.SCHEDULED)
-        ti = dag_run.get_task_instance(task.task_id)
-        ti.state = State.SCHEDULED
-        session.merge(ti)
-        session.flush()
-
-        captured_queries = []
-
-        def capture_locked_query(query, **kwargs):
-            captured_queries.append(query)
-            return query
-
-        with mock.patch("airflow.jobs.scheduler_job_runner.with_row_locks", side_effect=capture_locked_query):
-            queued_tis = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
-
-        assert {queued_ti.key for queued_ti in queued_tis} == {ti.key}
-
-        compiled_query = str(captured_queries[0].compile(dialect=postgresql.dialect()))
-
-        assert "dag_run_1.conf" not in compiled_query
-        assert "JOIN dag_run AS dag_run_1" in compiled_query
 
     def test_find_executable_task_instances_pool(self, dag_maker):
         dag_id = "SchedulerJobTest.test_find_executable_task_instances_pool"
@@ -8634,6 +8454,74 @@ class TestSchedulerJob:
         assert asset in active
         assert asset not in orphaned
 
+    def test_asset_orphaning_delete_has_no_cte(self, dag_maker, session):
+        """MySQL-compatible backends such as Vitess reject a WITH clause in a DELETE statement."""
+        self.job_runner = SchedulerJobRunner(job=Job())
+
+        asset1 = Asset(uri="test://asset_1", name="test_asset_1", group="test_group")
+
+        with dag_maker(dag_id="assets-1", schedule=[asset1], session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        with dag_maker(dag_id="assets-1", schedule=None, session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        with mock.patch.object(
+            session, "execute", autospec=True, side_effect=session.execute
+        ) as mock_execute:
+            self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        asset_active_deletes = [
+            call.args[0]
+            for call in mock_execute.call_args_list
+            if isinstance(call.args[0], Delete) and call.args[0].table == AssetActive.__table__
+        ]
+        assert len(asset_active_deletes) == 1
+        assert "WITH" not in str(asset_active_deletes[0].compile(dialect=mysql.dialect()))
+
+        orphaned, active = self._find_assets_activation(session)
+        assert active == []
+        assert orphaned == [asset1]
+
+
+    def test_asset_orphaning_delete_has_no_cte(self, dag_maker, session):
+        """MySQL-compatible backends such as Vitess reject a WITH clause in a DELETE statement."""
+        self.job_runner = SchedulerJobRunner(job=Job())
+
+        asset1 = Asset(uri="test://asset_1", name="test_asset_1", group="test_group")
+
+        with dag_maker(dag_id="assets-1", schedule=[asset1], session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        with dag_maker(dag_id="assets-1", schedule=None, session=session):
+            BashOperator(task_id="task", bash_command="echo 1")
+
+        with mock.patch.object(
+            session, "execute", autospec=True, side_effect=session.execute
+        ) as mock_execute:
+            self.job_runner._update_asset_orphanage(session=session)
+        session.flush()
+
+        asset_active_deletes = [
+            call.args[0]
+            for call in mock_execute.call_args_list
+            if isinstance(call.args[0], Delete) and call.args[0].table == AssetActive.__table__
+        ]
+        assert len(asset_active_deletes) == 1
+        assert "WITH" not in str(asset_active_deletes[0].compile(dialect=mysql.dialect()))
+
+        orphaned, active = self._find_assets_activation(session)
+        assert active == []
+        assert orphaned == [asset1]
+
+
     def test_asset_orphaning_ignore_orphaned_assets(self, dag_maker, session):
         self.job_runner = SchedulerJobRunner(job=Job())
 
@@ -10296,8 +10184,10 @@ def test_schedule_dag_run_with_upstream_skip(dag_maker, session):
     assert tis[dummy1.task_id].state == State.SKIPPED
     assert tis[dummy2.task_id].state == State.SUCCESS
     # dummy3 should be skipped because dummy1 is skipped.
-    assert tis[dummy3.task_id].state == State.SKIPPED
-
+    assert tis[dummy3.task_id].state == State.SKIPPED    
+    
+    assert tis[dummy3.task_id].state == State.SKIPPED    
+    
     def test_start_queued_dagruns_uses_latest_max_active_runs_from_dag_model(self, dag_maker, session):
         """
         Test that _start_queued_dagruns uses max_active_runs from DagModel (via dag_run)

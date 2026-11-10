@@ -20,12 +20,16 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 import pytest
-from task_sdk.definitions.test_callback import TEST_CALLBACK_KWARGS, TEST_CALLBACK_PATH, UNIMPORTABLE_DOT_PATH
-
+from task_sdk.definitions.test_callback import (TEST_CALLBACK_KWARGS, TEST_CALLBACK_PATH, UNIMPORTABLE_DOT_PATH,)
 from airflow.sdk.definitions.callback import AsyncCallback, SyncCallback
-from airflow.sdk.definitions.deadline import DeadlineAlert, DeadlineReference, VariableInterval
+from airflow.sdk.definitions.deadline import BaseDeadlineReference, DagRunQueuedAtDeadline, DeadlineAlert, DeadlineReference, VariableInterval
 from airflow.sdk.definitions.variable import Variable
 from airflow.sdk.exceptions import AirflowRuntimeError
+from airflow.sdk.definitions.constants import (
+    DAGRUN_QUEUED_TIMING,
+    REFERENCE_TIMING_FIELD,
+    REFERENCE_TYPE_FIELD,
+)
 
 DAG_ID = "dag_id_1"
 RUN_ID = 1
@@ -213,3 +217,39 @@ class TestVariableInterval:
         with pytest.warns(DeprecationWarning, match="VariableInterval.resolve"):
             with pytest.raises(ValueError, match=match):
                 interval.resolve()
+
+def test_builtin_deadline_reference_serialization():
+    ref = DagRunQueuedAtDeadline()
+    serialized = ref.serialize_reference()
+    assert serialized.get(REFERENCE_TIMING_FIELD) == DAGRUN_QUEUED_TIMING
+
+
+def test_custom_deadline_reference_registration_and_serialization():
+    class CustomQueuedRef(BaseDeadlineReference):
+        pass
+
+    DeadlineReference.register_custom_reference(
+        CustomQueuedRef,
+        deadline_reference_type=DeadlineReference.TYPES.DAGRUN_QUEUED,
+    )
+    instance = CustomQueuedRef()
+    serialized = instance.serialize_reference()
+    assert getattr(CustomQueuedRef, "reference_timing", None) == DAGRUN_QUEUED_TIMING
+    assert serialized.get(REFERENCE_TIMING_FIELD) == DAGRUN_QUEUED_TIMING
+
+
+def test_deadline_reference_deserialization_with_timing():
+    data = {
+        REFERENCE_TYPE_FIELD: "BaseDeadlineReference",
+        REFERENCE_TIMING_FIELD: DAGRUN_QUEUED_TIMING,
+    }
+    deserialized = BaseDeadlineReference.deserialize_reference(data)
+    assert getattr(deserialized, "reference_timing", None) == DAGRUN_QUEUED_TIMING
+
+
+def test_deserialize_legacy_deadline_reference_without_timing():
+    legacy_payload = {
+        REFERENCE_TYPE_FIELD: "DagRunQueuedAtDeadline",
+    }
+    deserialized = BaseDeadlineReference.deserialize_reference(legacy_payload)
+    assert getattr(deserialized, "reference_timing", None) is None
