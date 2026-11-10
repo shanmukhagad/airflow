@@ -2884,7 +2884,20 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                 default=None,
             )
             for task_instance in unfinished_task_instances:
-                task_instance.state = TaskInstanceState.SKIPPED
+                # Check if call_on_kill_on_dagrun_timeout is enabled on DAG or Task
+                task_obj = dag.get_task(task_instance.task_id) if dag.has_task(task_instance.task_id) else None
+                should_call_on_kill = getattr(
+                    dag, "call_on_kill_on_dagrun_timeout", True
+                ) or getattr(task_obj, "call_on_kill_on_dagrun_timeout", False)
+
+                if should_call_on_kill and task_instance.state == TaskInstanceState.RUNNING:
+                    task_instance.state = TaskInstanceState.FAILED
+                    # Dispatch termination request to the excutor to trigger local on_kill() on worker
+                    if hasattr(self.job, "executor") and self.job.executor:
+                        self.job.executor.terminate(task_instance)
+                else:
+                    task_instance.state = TaskInstanceState.SKIPPED
+
                 session.merge(task_instance)
             session.flush()
             self.log.info("Run %s of %s has timed-out", dag_run.run_id, dag_run.dag_id)

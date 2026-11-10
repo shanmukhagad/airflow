@@ -1546,8 +1546,12 @@ def _run_task_and_map_outcome(
         if pid != parent_pid:
             return
 
-        if ti.task:
-            ti.task.on_kill()
+if hasattr(ti.task, "on_kill"):
+            try:
+                log.info("Executing on_kill() for task %s on termination signal", ti.task_id)
+                ti.task.on_kill()
+            except Exception as e:
+                log.error("Error executing on_kill() for task %s: %s", ti.task_id, e)
         raise AirflowTaskTerminated("Task process received SIGTERM")
 
     signal.signal(signal.SIGTERM, _on_term)
