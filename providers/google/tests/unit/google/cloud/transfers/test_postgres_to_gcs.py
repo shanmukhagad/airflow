@@ -86,8 +86,10 @@ class _FakeServerCursor:
 class _FakeSelfIteratingServerCursor(_FakeServerCursor):
     """Server-side cursor that is its own iterator."""
 
-    _page = None
-    _pos = 0
+    def __init__(self, rows):
+        super().__init__(rows)
+        self._page = None
+        self._pos = 0
 
     def __iter__(self):
         return self
