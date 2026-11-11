@@ -356,6 +356,21 @@ class TestSparkSubmitHook:
         assert expected_spark_standalone_cluster == build_track_driver_status_spark_standalone_cluster
         assert expected_spark_yarn_cluster == build_track_driver_status_spark_yarn_cluster
 
+    def test_build_track_driver_status_command_standalone_submit_port(self):
+
+        hook = SparkSubmitHook(conn_id="spark_standalone_cluster")
+        hook._connection["master"] = "spark://spark-standalone-master:7077"
+        hook._driver_id = "driver-20171128111416-0001"
+
+        command = hook._build_track_driver_status_command()
+
+        assert command == [
+            "/usr/bin/curl",
+            "--max-time",
+            "30",
+            "http://spark-standalone-master:6066/v1/submissions/status/driver-20171128111416-0001",
+        ]
+
     @pytest.mark.db_test
     @patch("airflow.providers.apache.spark.hooks.spark_submit.subprocess.Popen")
     def test_spark_process_runcmd(self, mock_popen, sdk_connection_not_found):
