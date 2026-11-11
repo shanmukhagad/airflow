@@ -1015,7 +1015,7 @@ class PodManager(LoggingMixin):
                 )
             time.sleep(1)
 
-    def extract_xcom(self, pod: V1Pod) -> str:
+    def extract_xcom(self, pod: V1Pod, ignore_kill_failure: bool = True) -> str:
         """Retrieve XCom value and kill xcom sidecar container."""
         # make sure that xcom sidecar container is still running
         if not self.container_is_running(pod, PodDefaults.SIDECAR_CONTAINER_NAME):
@@ -1027,7 +1027,17 @@ class PodManager(LoggingMixin):
             result = self.extract_xcom_json(pod)
             return result
         finally:
-            self.extract_xcom_kill(pod)
+            try:
+                self.extract_xcom_kill(pod)
+            except (PodCommandException, ApiException) as e:
+                if not ignore_kill_failure:
+                    raise
+                self.log.warning(
+                    "Failed to kill xcom sidecar container in pod %s, leaving it running: %s",
+                    pod.metadata.name,
+                    e,
+                )
+            
 
     @generic_api_retry
     def extract_xcom_json(self, pod: V1Pod) -> str:
