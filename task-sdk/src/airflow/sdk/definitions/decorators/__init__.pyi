@@ -866,6 +866,7 @@ class TaskDecoratorCollection:
         mode: str = ...,
         exponential_backoff: bool = False,
         max_wait: timedelta | float | None = None,
+        templates_dict: dict | None = None,
         **kwargs,
     ) -> TaskDecorator:
         """
@@ -890,6 +891,10 @@ class TaskDecoratorCollection:
         :param exponential_backoff: allow progressive longer waits between
             pokes by using exponential backoff algorithm
         :param max_wait: maximum wait interval between pokes, can be ``timedelta`` or ``float`` seconds
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
         """
     @overload
     def sensor(self, python_callable: Callable[FParams, FReturn] | None = None) -> Task[FParams, FReturn]: ...
@@ -924,6 +929,7 @@ class TaskDecoratorCollection:
         output_encoding: str = "utf-8",
         skip_on_exit_code: int = 99,
         cwd: str | None = None,
+        output_processor: Callable[[str], Any] = ...,
         **kwargs,
     ) -> TaskDecorator:
         """Decorator to wrap a callable into a BashOperator task.
@@ -942,6 +948,8 @@ class TaskDecoratorCollection:
             (default: 99). If set to ``None``, any non-zero exit code will be treated as a failure.
         :param cwd: Working directory to execute the command in. If None (default), the command is run in a
             temporary directory.
+        :param output_processor: Function to further process the output of the bash script
+            (default is lambda output: output).
         """
     @overload
     def bash(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
