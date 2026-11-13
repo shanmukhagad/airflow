@@ -20,7 +20,7 @@
 # documentation for more details.
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Container, Iterable, Mapping
+from collections.abc import Callable, Collection, Container, Iterable, Mapping, Sequence
 from datetime import timedelta
 from typing import Any, Literal, TypeVar, overload
 
@@ -57,6 +57,7 @@ class TaskDecoratorCollection:
         # _PythonDecoratedOperator.
         templates_dict: Mapping[str, Any] | None = None,
         show_return_value_in_logs: bool = True,
+        templates_exts: Sequence[str] | None = None,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a task.
@@ -71,6 +72,8 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
         """
     # [START mixin_for_typing]
     @overload
