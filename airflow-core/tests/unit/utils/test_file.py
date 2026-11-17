@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import zipfile
+from pathlib import Path
 from pprint import pformat
 from unittest import mock
 
@@ -28,6 +29,7 @@ from airflow._shared.module_loading import find_path_from_directory
 from airflow.utils import file as file_utils
 from airflow.utils.file import (
     correct_maybe_zipped,
+    find_dag_file_paths,
     list_py_file_paths,
     open_maybe_zipped,
 )
@@ -229,3 +231,42 @@ def test_get_unique_dag_module_name(edge_filename, expected_modification):
         mocked_sha1.return_value.hexdigest.return_value = "mocked_path_hash_sha1"
         modify_module_name = file_utils.get_unique_dag_module_name(edge_filename)
         assert modify_module_name == expected_modification
+
+
+def test_find_dag_file_paths_ignores_non_zip_archives(tmp_path):
+    dags_dir = tmp_path / "dags"
+    dags_dir.mkdir()
+
+    valid_py = dags_dir / "valid_dag.py"
+    valid_py.write_text("from airflow import DAG\ndag = DAG('valid_py')\n")
+
+    valid_zip = dags_dir / "valid_bundle.zip"
+    with zipfile.ZipFile(valid_zip, "w") as zf:
+        zf.writestr("bundled_dag.py", "from airflow import DAG\ndag = DAG('valid_zip')\n")
+
+    valid_upper_zip = dags_dir / "upper_bundle.ZIP"
+    with zipfile.ZipFile(valid_upper_zip, "w") as zf:
+        zf.writestr("upper_dag.py", "from airflow import DAG\ndag = DAG('upper_zip')\n")
+
+    non_zip_archives = [
+        "spark_job.jar",
+        "architecture.docx",
+        "metrics.xlsx",
+        "presentation.pptx",
+        "dependency.whl",
+    ]
+    for filename in non_zip_archives:
+        archive_path = dags_dir / filename
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr(
+                "content.xml",
+                "from airflow import DAG\ndag = DAG('ignored_archive')\n",
+            )
+
+    discovered = {Path(p).name for p in find_dag_file_paths(str(dags_dir), safe_mode=False)}
+
+    assert "valid_dag.py" in discovered
+    assert "valid_bundle.zip" in discovered
+    assert "upper_bundle.ZIP" in discovered
+    for filename in non_zip_archives:
+        assert filename not in discovered
