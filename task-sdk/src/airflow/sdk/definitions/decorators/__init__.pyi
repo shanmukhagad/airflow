@@ -280,6 +280,12 @@ class TaskDecoratorCollection:
         index_urls: None | Collection[str] | str = None,
         venv_cache_path: None | str = None,
         show_return_value_in_logs: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        index_urls_from_connection_ids: None | Collection[str] | str = None,
+        env_vars: dict[str, str] | None = None,
+        inherit_env: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchPythonVirtualenvOperator.
@@ -318,6 +324,21 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param index_urls_from_connection_ids: An optional list of connection IDs to load Python packages from.
+            If not provided the system pip conf will be used to source packages from.
+        :param env_vars: A dictionary containing additional environment variables to set for the virtual
+            environment when it is executed.
+        :param inherit_env: Whether to inherit the current environment variables when executing the virtual
+            environment. If set to ``True``, the virtual environment will inherit the environment variables
+            of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
+            executed with a clean environment.
         """
     @overload
     def branch_virtualenv(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
