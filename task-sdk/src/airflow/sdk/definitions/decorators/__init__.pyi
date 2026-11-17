@@ -353,6 +353,13 @@ class TaskDecoratorCollection:
         serializer: Literal["pickle", "cloudpickle", "dill"] | None = None,
         templates_dict: Mapping[str, Any] | None = None,
         show_return_value_in_logs: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        expect_pendulum: bool = False,
+        skip_on_exit_code: int | Container[int] | None = None,
+        env_vars: dict[str, str] | None = None,
+        inherit_env: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchExternalPythonOperator.
@@ -380,6 +387,24 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param expect_pendulum: expect Pendulum to be installed in the target environment. If true, the
+            operator will raise warning if Pendulum is not installed.
+        :param skip_on_exit_code: If python_callable exits with this exit code, leave the task
+            in ``skipped`` state (default: None). If set to ``None``, any non-zero
+            exit code will be treated as a failure.
+        :param env_vars: A dictionary containing additional environment variables to set for the virtual
+            environment when it is executed.
+        :param inherit_env: Whether to inherit the current environment variables when executing the virtual
+            environment. If set to ``True``, the virtual environment will inherit the environment variables
+            of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
+            executed with a clean environment.
         """
     @overload
     def branch_external_python(
