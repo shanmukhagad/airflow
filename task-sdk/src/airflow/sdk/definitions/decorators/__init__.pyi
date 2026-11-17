@@ -111,6 +111,10 @@ class TaskDecoratorCollection:
         show_return_value_in_logs: bool = True,
         env_vars: dict[str, str] | None = None,
         inherit_env: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        index_urls_from_connection_ids: None | Collection[str] | str = None,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a virtual environment task.
@@ -156,6 +160,15 @@ class TaskDecoratorCollection:
             environment. If set to ``True``, the virtual environment will inherit the environment variables
             of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
             executed with a clean environment.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param index_urls_from_connection_ids: An optional list of connection IDs to load Python packages from.
+            If not provided the system pip conf will be used to source packages from.
         """
     @overload
     def virtualenv(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
