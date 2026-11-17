@@ -878,6 +878,18 @@ class TaskDecoratorCollection:
         termination_message_policy: str = ...,
         active_deadline_seconds: int | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        is_delete_operator_pod: bool | None = None,
+        logging_interval: int | None = None,
+        callbacks: list[Any] | Any | None = None,
+        on_kill_action: str = "delete_pod",
+        init_container_logs: Iterable[str] | None = None,
+        container_name_log_prefix_enabled: bool = True,
+        log_formatter: Callable[[str, str], str] | None = None,
+        runtime_class_name: str | None = None,
+        schedule_timeout_seconds: int | None = None,
+        trigger_kwargs: dict[str, Any] | None = None,
+        automount_service_account_token: bool | None = None,
+        skip_waiting_for_sidecars: bool = False,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to run a command returned by callable in a Kubernetes pod.
@@ -981,6 +993,30 @@ class TaskDecoratorCollection:
         :param active_deadline_seconds: The active_deadline_seconds which matches to active_deadline_seconds
             in V1PodSpec.
         :param progress_callback: Callback function for receiving k8s container logs.
+        :param is_delete_operator_pod: What to do when the pod reaches its final
+            state, or the execution is interrupted. If True (default), delete the
+            pod; if False, leave the pod.
+        :param logging_interval: max time in seconds that task should be in
+            deferred state before resuming to fetch the latest logs. If ``None``,
+            then the task will remain in deferred state until pod is done, and no
+            logs will be visible until that happens.
+        :param callbacks: pod execution callbacks to be called at various stages of pod lifecycle.
+        :param on_kill_action: What to do when the task is killed by the user (e.g. manually marked
+            as success/failed from the Airflow UI). If ``"delete_pod"`` (default), the pod will be
+            deleted. If ``"keep_pod"``, the pod will not be deleted.
+        :param init_container_logs: list of init containers whose logs will be published to stdout
+            Works in conjunction with ``get_logs`` param.
+        :param container_name_log_prefix_enabled: if True, will prefix container name to each log line.
+            Default is True.
+        :param log_formatter: custom log formatter function that takes two string arguments:
+            (container_name, message) and returns a formatted log line string.
+            If not provided, default formatting will be used.
+        :param runtime_class_name: name of the runtime class to use for the pod.
+        :param schedule_timeout_seconds: max time in seconds to wait for the pod to be scheduled.
+        :param trigger_kwargs: additional keyword arguments to pass to the trigger in deferrable mode.
+        :param automount_service_account_token: whether to automount the service account token in the pod.
+        :param skip_waiting_for_sidecars: if True, will not wait for sidecar containers to finish
+            before terminating the pod. Default is False.
         """
     @overload
     def kubernetes_cmd(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
