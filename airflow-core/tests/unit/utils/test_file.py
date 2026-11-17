@@ -147,6 +147,18 @@ class TestDagFileHelpers:
 
         assert file_utils.might_contain_dag(file_path=file_path_with_dag, safe_mode=True, conf=conf)
 
+    def test_default_heuristic_treats_only_dot_zip_as_zip_bundle(self, tmp_path):
+        zip_bundle = tmp_path / "bundle.ZIP"
+        with zipfile.ZipFile(zip_bundle, "w"):
+            pass
+
+        jar_bundle = tmp_path / "job.jar"
+        with zipfile.ZipFile(jar_bundle, "w") as zf:
+            zf.writestr("content.xml", "not a dag")
+
+        assert file_utils.might_contain_dag_via_default_heuristic(str(zip_bundle))
+        assert not file_utils.might_contain_dag_via_default_heuristic(str(jar_bundle))
+
     @conf_vars({("core", "might_contain_dag_callable"): "unit.utils.test_file.might_contain_dag"})
     def test_might_contain_dag(self):
         """Test might_contain_dag_callable"""

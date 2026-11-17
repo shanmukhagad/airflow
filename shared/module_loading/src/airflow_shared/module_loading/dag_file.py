@@ -90,7 +90,7 @@ def might_contain_dag_via_default_heuristic(
     elif zip_file:
         with zip_file.open(file_path) as current_file:
             data = current_file.read()
-    elif zipfile.is_zipfile(file_path):
+    elif Path(file_path).suffix.lower() == ".zip" and zipfile.is_zipfile(file_path):
         return True
     else:
         with open(file_path, "rb") as dag_file:
