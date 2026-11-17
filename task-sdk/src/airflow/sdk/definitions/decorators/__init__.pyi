@@ -496,6 +496,7 @@ class TaskDecoratorCollection:
         port_bindings: dict | None = None,
         ulimits: list[dict] | None = None,
         labels: dict[str, str] | list[str] | None = None,
+        expect_airflow: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a Docker task.
@@ -602,6 +603,9 @@ class TaskDecoratorCollection:
             be a :py:class:`docker.types.Ulimit` instance.
         :param labels: A dictionary of name-value labels (e.g. ``{"label1": "value1", "label2": "value2"}``)
             or a list of names of labels to set with empty values (e.g. ``["label1", "label2"]``)
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
         """
         # [END decorator_signature]
     @overload
