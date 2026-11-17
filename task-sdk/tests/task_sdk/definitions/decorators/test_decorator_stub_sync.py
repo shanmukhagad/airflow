@@ -151,9 +151,11 @@ def compare(classes: dict, decorated_class: str, listed: set[str], base_accepted
     """Compare one decorator's stub entry with its operator and decorator class."""
     bases = classes[decorated_class]["bases"]
     operator = next((b for b in bases if b and b not in WRAPPER_BASES and b in classes), None)
-    operator_params = {
-        p for p in effective_params(classes, operator, STOP_AT_FOR_OPERATOR) if p not in STRUCTURAL_PARAMS
-    }
+    operator_params = (
+        {p for p in effective_params(classes, operator, STOP_AT_FOR_OPERATOR) if p not in STRUCTURAL_PARAMS}
+        if operator is not None
+        else set()
+    )
     decorated = {
         p
         for p in effective_params(classes, decorated_class, STOP_AT_FOR_DECORATOR)
