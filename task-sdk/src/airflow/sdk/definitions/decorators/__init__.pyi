@@ -204,7 +204,13 @@ class TaskDecoratorCollection:
         """
     @overload
     def branch(  # type: ignore[misc]
-        self, *, multiple_outputs: bool | None = None, **kwargs
+        self,
+        *,
+        multiple_outputs: bool | None = None,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
+        **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchPythonOperator.
 
@@ -213,6 +219,17 @@ class TaskDecoratorCollection:
 
         :param multiple_outputs: If set, function return value will be unrolled to multiple XCom values.
             Dict will unroll to XCom values with keys as XCom keys. Defaults to False.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
+
         """
     @overload
     def branch(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -322,7 +339,10 @@ class TaskDecoratorCollection:
         self,
         *,
         multiple_outputs: bool | None = None,
-        ignore_downstream_trigger_rules: bool = True,
+                ignore_downstream_trigger_rules: bool = True,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a ShortCircuitOperator.
@@ -333,6 +353,16 @@ class TaskDecoratorCollection:
             will be skipped. This is the default behavior. If set to False, the direct, downstream task(s)
             will be skipped but the ``trigger_rule`` defined for a other downstream tasks will be respected.
             Defaults to True.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
         """
     @overload
     def short_circuit(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -904,7 +934,10 @@ class TaskDecoratorCollection:
         *,
         multiple_outputs: bool | None = None,
         conn_id: str | None = None,
-        config_kwargs: dict[str, str] | None = None,
+                config_kwargs: dict[str, str] | None = None,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """
@@ -915,6 +948,16 @@ class TaskDecoratorCollection:
         :param conn_id: The connection ID to use for the SparkSession.
         :param config_kwargs: Additional kwargs to pass to the SparkSession builder. This overrides
             the config from the connection.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
         """
     @overload
     def pyspark(
