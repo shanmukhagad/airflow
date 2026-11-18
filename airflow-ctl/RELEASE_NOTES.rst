@@ -17,6 +17,14 @@
 
  .. This file is populated while releasing after cutting the release candidate. Please do not edit in PRs.
 
+Unreleased
+----------
+
+Bug Fixes
+^^^^^^^^^
+
+- Fix triggering Dag runs against older API servers by omitting unused optional request fields while preserving required fields and supplied values.
+
 airflowctl 0.1.5 (2026-05-26)
 -----------------------------
 
