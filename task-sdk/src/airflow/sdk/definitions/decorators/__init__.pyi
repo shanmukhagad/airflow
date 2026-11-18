@@ -20,7 +20,7 @@
 # documentation for more details.
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Container, Iterable, Mapping
+from collections.abc import Callable, Collection, Container, Iterable, Mapping, Sequence
 from datetime import timedelta
 from typing import Any, Literal, TypeVar, overload
 
@@ -57,6 +57,7 @@ class TaskDecoratorCollection:
         # _PythonDecoratedOperator.
         templates_dict: Mapping[str, Any] | None = None,
         show_return_value_in_logs: bool = True,
+        templates_exts: Sequence[str] | None = None,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a task.
@@ -71,6 +72,8 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
         """
     # [START mixin_for_typing]
     @overload
@@ -108,6 +111,10 @@ class TaskDecoratorCollection:
         show_return_value_in_logs: bool = True,
         env_vars: dict[str, str] | None = None,
         inherit_env: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        index_urls_from_connection_ids: None | Collection[str] | str = None,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a virtual environment task.
@@ -153,6 +160,15 @@ class TaskDecoratorCollection:
             environment. If set to ``True``, the virtual environment will inherit the environment variables
             of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
             executed with a clean environment.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param index_urls_from_connection_ids: An optional list of connection IDs to load Python packages from.
+            If not provided the system pip conf will be used to source packages from.
         """
     @overload
     def virtualenv(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -168,6 +184,11 @@ class TaskDecoratorCollection:
         show_return_value_in_logs: bool = True,
         env_vars: dict[str, str] | None = None,
         inherit_env: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        skip_on_exit_code: int | Container[int] | None = None,
+        expect_pendulum: bool = False,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a virtual environment task.
@@ -198,10 +219,28 @@ class TaskDecoratorCollection:
             environment. If set to ``True``, the virtual environment will inherit the environment variables
             of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
             executed with a clean environment.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param skip_on_exit_code: If python_callable exits with this exit code, leave the task
+            in ``skipped`` state (default: None). If set to ``None``, any non-zero
+            exit code will be treated as a failure.
+        :param expect_pendulum: expect Pendulum to be installed in the target environment. If true, the
+            operator will raise warning if Pendulum is not installed.
         """
     @overload
     def branch(  # type: ignore[misc]
-        self, *, multiple_outputs: bool | None = None, **kwargs
+        self,
+        *,
+        multiple_outputs: bool | None = None,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
+        **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchPythonOperator.
 
@@ -210,6 +249,17 @@ class TaskDecoratorCollection:
 
         :param multiple_outputs: If set, function return value will be unrolled to multiple XCom values.
             Dict will unroll to XCom values with keys as XCom keys. Defaults to False.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
+
         """
     @overload
     def branch(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -230,6 +280,12 @@ class TaskDecoratorCollection:
         index_urls: None | Collection[str] | str = None,
         venv_cache_path: None | str = None,
         show_return_value_in_logs: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        index_urls_from_connection_ids: None | Collection[str] | str = None,
+        env_vars: dict[str, str] | None = None,
+        inherit_env: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchPythonVirtualenvOperator.
@@ -268,6 +324,21 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param index_urls_from_connection_ids: An optional list of connection IDs to load Python packages from.
+            If not provided the system pip conf will be used to source packages from.
+        :param env_vars: A dictionary containing additional environment variables to set for the virtual
+            environment when it is executed.
+        :param inherit_env: Whether to inherit the current environment variables when executing the virtual
+            environment. If set to ``True``, the virtual environment will inherit the environment variables
+            of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
+            executed with a clean environment.
         """
     @overload
     def branch_virtualenv(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -282,6 +353,13 @@ class TaskDecoratorCollection:
         serializer: Literal["pickle", "cloudpickle", "dill"] | None = None,
         templates_dict: Mapping[str, Any] | None = None,
         show_return_value_in_logs: bool = True,
+        string_args: Iterable[str] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        expect_airflow: bool = True,
+        expect_pendulum: bool = False,
+        skip_on_exit_code: int | Container[int] | None = None,
+        env_vars: dict[str, str] | None = None,
+        inherit_env: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a BranchExternalPythonOperator.
@@ -309,6 +387,24 @@ class TaskDecoratorCollection:
             logs. Defaults to True, which allows return value log output.
             It can be set to False to prevent log output of return value when you return huge data
             such as transmission a large amount of XCom to TaskAPI.
+        :param string_args: Strings that are present in the global var ``string_args_global`` in the
+            virtualenv, typed as a list of strings.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
+        :param expect_pendulum: expect Pendulum to be installed in the target environment. If true, the
+            operator will raise warning if Pendulum is not installed.
+        :param skip_on_exit_code: If python_callable exits with this exit code, leave the task
+            in ``skipped`` state (default: None). If set to ``None``, any non-zero
+            exit code will be treated as a failure.
+        :param env_vars: A dictionary containing additional environment variables to set for the virtual
+            environment when it is executed.
+        :param inherit_env: Whether to inherit the current environment variables when executing the virtual
+            environment. If set to ``True``, the virtual environment will inherit the environment variables
+            of the parent process (``os.environ``). If set to ``False``, the virtual environment will be
+            executed with a clean environment.
         """
     @overload
     def branch_external_python(
@@ -320,6 +416,9 @@ class TaskDecoratorCollection:
         *,
         multiple_outputs: bool | None = None,
         ignore_downstream_trigger_rules: bool = True,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to wrap the decorated callable into a ShortCircuitOperator.
@@ -330,6 +429,16 @@ class TaskDecoratorCollection:
             will be skipped. This is the default behavior. If set to False, the direct, downstream task(s)
             will be skipped but the ``trigger_rule`` defined for a other downstream tasks will be respected.
             Defaults to True.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
         """
     @overload
     def short_circuit(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -387,6 +496,7 @@ class TaskDecoratorCollection:
         port_bindings: dict | None = None,
         ulimits: list[dict] | None = None,
         labels: dict[str, str] | list[str] | None = None,
+        expect_airflow: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert the decorated callable to a Docker task.
@@ -493,6 +603,9 @@ class TaskDecoratorCollection:
             be a :py:class:`docker.types.Ulimit` instance.
         :param labels: A dictionary of name-value labels (e.g. ``{"label1": "value1", "label2": "value2"}``)
             or a list of names of labels to set with empty values (e.g. ``["label1", "label2"]``)
+        :param expect_airflow: expect Airflow to be installed in the target environment. If true, the
+            operator will raise warning if Airflow is not installed, and it will attempt to load Airflow
+            macros when starting.
         """
         # [END decorator_signature]
     @overload
@@ -562,6 +675,18 @@ class TaskDecoratorCollection:
         termination_message_policy: str = ...,
         active_deadline_seconds: int | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        is_delete_operator_pod: bool | None = None,
+        logging_interval: int | None = None,
+        callbacks: list[Any] | Any | None = None,
+        on_kill_action: str = "delete_pod",
+        init_container_logs: Iterable[str] | None = None,
+        container_name_log_prefix_enabled: bool = True,
+        log_formatter: Callable[[str, str], str] | None = None,
+        runtime_class_name: str | None = None,
+        schedule_timeout_seconds: int | None = None,
+        trigger_kwargs: dict[str, Any] | None = None,
+        automount_service_account_token: bool | None = None,
+        skip_waiting_for_sidecars: bool = False,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to convert a callable to a Kubernetes Pod task.
@@ -673,6 +798,30 @@ class TaskDecoratorCollection:
         :param active_deadline_seconds: The active_deadline_seconds which matches to active_deadline_seconds
             in V1PodSpec.
         :param progress_callback: Callback function for receiving k8s container logs.
+        :param is_delete_operator_pod: What to do when the pod reaches its final
+            state, or the execution is interrupted. If True (default), delete the
+            pod; if False, leave the pod.
+        :param logging_interval: max time in seconds that task should be in
+            deferred state before resuming to fetch the latest logs. If ``None``,
+            then the task will remain in deferred state until pod is done, and no
+            logs will be visible until that happens.
+        :param callbacks: pod execution callbacks to be called at various stages of pod lifecycle.
+        :param on_kill_action: What to do when the task is killed by the user (e.g. manually marked
+            as success/failed from the Airflow UI). If ``"delete_pod"`` (default), the pod will be
+            deleted. If ``"keep_pod"``, the pod will not be deleted.
+        :param init_container_logs: list of init containers whose logs will be published to stdout
+            Works in conjunction with ``get_logs`` param.
+        :param container_name_log_prefix_enabled: if True, will prefix container name to each log line.
+            Default is True.
+        :param log_formatter: custom log formatter function that takes two string arguments:
+            (container_name, message) and returns a formatted log line string.
+            If not provided, default formatting will be used.
+        :param runtime_class_name: name of the runtime class to use for the pod.
+        :param schedule_timeout_seconds: max time in seconds to wait for the pod to be scheduled.
+        :param trigger_kwargs: additional keyword arguments to pass to the trigger in deferrable mode.
+        :param automount_service_account_token: whether to automount the service account token in the pod.
+        :param skip_waiting_for_sidecars: if True, will not wait for sidecar containers to finish
+            before terminating the pod. Default is False.
         """
     @overload
     def kubernetes(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -742,6 +891,18 @@ class TaskDecoratorCollection:
         termination_message_policy: str = ...,
         active_deadline_seconds: int | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        is_delete_operator_pod: bool | None = None,
+        logging_interval: int | None = None,
+        callbacks: list[Any] | Any | None = None,
+        on_kill_action: str = "delete_pod",
+        init_container_logs: Iterable[str] | None = None,
+        container_name_log_prefix_enabled: bool = True,
+        log_formatter: Callable[[str, str], str] | None = None,
+        runtime_class_name: str | None = None,
+        schedule_timeout_seconds: int | None = None,
+        trigger_kwargs: dict[str, Any] | None = None,
+        automount_service_account_token: bool | None = None,
+        skip_waiting_for_sidecars: bool = False,
         **kwargs,
     ) -> TaskDecorator:
         """Create a decorator to run a command returned by callable in a Kubernetes pod.
@@ -850,6 +1011,30 @@ class TaskDecoratorCollection:
         :param active_deadline_seconds: The active_deadline_seconds which matches to active_deadline_seconds
             in V1PodSpec.
         :param progress_callback: Callback function for receiving k8s container logs.
+        :param is_delete_operator_pod: What to do when the pod reaches its final
+            state, or the execution is interrupted. If True (default), delete the
+            pod; if False, leave the pod.
+        :param logging_interval: max time in seconds that task should be in
+            deferred state before resuming to fetch the latest logs. If ``None``,
+            then the task will remain in deferred state until pod is done, and no
+            logs will be visible until that happens.
+        :param callbacks: pod execution callbacks to be called at various stages of pod lifecycle.
+        :param on_kill_action: What to do when the task is killed by the user (e.g. manually marked
+            as success/failed from the Airflow UI). If ``"delete_pod"`` (default), the pod will be
+            deleted. If ``"keep_pod"``, the pod will not be deleted.
+        :param init_container_logs: list of init containers whose logs will be published to stdout
+            Works in conjunction with ``get_logs`` param.
+        :param container_name_log_prefix_enabled: if True, will prefix container name to each log line.
+            Default is True.
+        :param log_formatter: custom log formatter function that takes two string arguments:
+            (container_name, message) and returns a formatted log line string.
+            If not provided, default formatting will be used.
+        :param runtime_class_name: name of the runtime class to use for the pod.
+        :param schedule_timeout_seconds: max time in seconds to wait for the pod to be scheduled.
+        :param trigger_kwargs: additional keyword arguments to pass to the trigger in deferrable mode.
+        :param automount_service_account_token: whether to automount the service account token in the pod.
+        :param skip_waiting_for_sidecars: if True, will not wait for sidecar containers to finish
+            before terminating the pod. Default is False.
         """
     @overload
     def kubernetes_cmd(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
@@ -863,6 +1048,7 @@ class TaskDecoratorCollection:
         mode: str = ...,
         exponential_backoff: bool = False,
         max_wait: timedelta | float | None = None,
+        templates_dict: dict | None = None,
         **kwargs,
     ) -> TaskDecorator:
         """
@@ -887,6 +1073,10 @@ class TaskDecoratorCollection:
         :param exponential_backoff: allow progressive longer waits between
             pokes by using exponential backoff algorithm
         :param max_wait: maximum wait interval between pokes, can be ``timedelta`` or ``float`` seconds
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
         """
     @overload
     def sensor(self, python_callable: Callable[FParams, FReturn] | None = None) -> Task[FParams, FReturn]: ...
@@ -897,6 +1087,9 @@ class TaskDecoratorCollection:
         multiple_outputs: bool | None = None,
         conn_id: str | None = None,
         config_kwargs: dict[str, str] | None = None,
+        templates_dict: Mapping[str, Any] | None = None,
+        templates_exts: Sequence[str] | None = None,
+        show_return_value_in_logs: bool = True,
         **kwargs,
     ) -> TaskDecorator:
         """
@@ -907,6 +1100,16 @@ class TaskDecoratorCollection:
         :param conn_id: The connection ID to use for the SparkSession.
         :param config_kwargs: Additional kwargs to pass to the SparkSession builder. This overrides
             the config from the connection.
+        :param templates_dict: a dictionary where the values are templates that
+            will get templated by the Airflow engine sometime between
+            ``__init__`` and ``execute`` takes place and are made available
+            in your callable's context after the template has been applied.
+        :param templates_exts: a list of file extensions to resolve while
+            processing templated fields, for examples ``['.sql', '.hql']``
+        :param show_return_value_in_logs: a bool value whether to show return_value
+            logs. Defaults to True, which allows return value log output.
+            It can be set to False to prevent log output of return value when you return huge data
+            such as transmission a large amount of XCom to TaskAPI.
         """
     @overload
     def pyspark(
@@ -921,6 +1124,7 @@ class TaskDecoratorCollection:
         output_encoding: str = "utf-8",
         skip_on_exit_code: int = 99,
         cwd: str | None = None,
+        output_processor: Callable[[str], Any] = ...,
         **kwargs,
     ) -> TaskDecorator:
         """Decorator to wrap a callable into a BashOperator task.
@@ -939,6 +1143,8 @@ class TaskDecoratorCollection:
             (default: 99). If set to ``None``, any non-zero exit code will be treated as a failure.
         :param cwd: Working directory to execute the command in. If None (default), the command is run in a
             temporary directory.
+        :param output_processor: Function to further process the output of the bash script
+            (default is lambda output: output).
         """
     @overload
     def bash(self, python_callable: Callable[FParams, FReturn]) -> Task[FParams, FReturn]: ...
