@@ -1656,6 +1656,35 @@ class TestDagOperations:
         )
         assert response == self.dag_run_response
 
+    @pytest.mark.parametrize("partition_key", [None, "sales"])
+    @pytest.mark.parametrize("logical_date", [None, "2025-01-01T00:00:00Z"])
+    @pytest.mark.parametrize("conf", [None, {"region": "west"}])
+    def test_trigger_omits_optional_defaults(self, partition_key, logical_date, conf):
+        trigger_body = TriggerDAGRunPostBody(
+            logical_date=logical_date,
+            partition_key=partition_key,
+            conf=conf,
+            dag_run_id="manual_sales",
+            note="Sales report",
+        )
+        expected_body = {
+            "logical_date": logical_date,
+            "conf": conf or {},
+            "dag_run_id": "manual_sales",
+            "note": "Sales report",
+        }
+        if partition_key is not None:
+            expected_body["partition_key"] = partition_key
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == f"/api/v2/dags/{self.dag_id}/dagRuns"
+            assert json.loads(request.content) == expected_body
+            return httpx.Response(200, json=json.loads(self.dag_run_response.model_dump_json()))
+
+        client = make_api_client(transport=httpx.MockTransport(handle_request))
+        response = client.dags.trigger(dag_id=self.dag_id, trigger_dag_run=trigger_body)
+        assert response == self.dag_run_response
+
 
 class TestDagRunOperations:
     dag_id = "dag_id"

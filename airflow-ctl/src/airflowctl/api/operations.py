@@ -667,6 +667,7 @@ class DagsOperations(BaseOperations):
         """Create a Dag run."""
         if trigger_dag_run.conf is None:
             trigger_dag_run.conf = {}
+        # Omit optional defaults for older servers, preserving required nullable logical_date.
         self.response = self.client.post(
             f"dags/{_quote_path_param(dag_id)}/dagRuns",
             json=trigger_dag_run.model_dump(mode="json", exclude_defaults=True),
